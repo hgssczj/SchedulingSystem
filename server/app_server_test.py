@@ -22,13 +22,14 @@ def work_func(task_name, q_input, q_output, model_ctx=None):
     for name_split in task_name_split:
         temp_name = name_split.capitalize()   # 各个字符串的首字母大写
         task_class_name = task_class_name + temp_name
-
+    print("开始执行进程提供服务：",task_class_name)
     # 使用importlib动态加载任务对应的类
     path1 = os.path.abspath('.')
     path2 = os.path.join(path1, task_name)
     path3 = os.path.join(path2, '')
-    sys.path.append(path3)   # 当前任务代码所在的文件夹，并将其加入模块导入搜索路径
+    #sys.path.append(path3)   # 当前任务代码所在的文件夹，并将其加入模块导入搜索路径
     module_path = task_name + '.' + task_name  # 绝对导入
+    print("路径是",path3,module_path)
     module_name = importlib.import_module(module_path)  # 加载模块，例如face_detection
     class_obj = getattr(module_name, task_class_name)  # 从模块中加载执行类，例如FaceDetection
 
@@ -203,7 +204,6 @@ def monitor_gpu(lock, pid_gpu_dict):
 
 def trigger_update_server_status():
     # 定时触发更新server状态
-    print(server_manager.server_ip)
     temp_url = "http://" + server_manager.server_ip + ":" + str(server_manager.server_port) + "/update_server_status"
     requests.get(temp_url)
     print("trigger_update_server_status!")
@@ -211,7 +211,6 @@ def trigger_update_server_status():
 
 def trigger_update_clients_status():
     # 定时触发获取所有边缘节点状态，心跳机制
-    print(server_manager.server_ip)
     temp_url = "http://" + server_manager.server_ip + ":" + str(server_manager.server_port) + "/update_clients_status"
     requests.get(temp_url)
     print("trigger_get_clients_status!")
@@ -221,6 +220,7 @@ class ServerManager(object):
     def __init__(self):
         # 云端系统配置相关
         self.server_ip = '114.212.81.11'  # 默认设置需要与服务器ip保持一致，供定时事件使用
+        #self.server_ip = '127.0.0.1'  # 如果这样设置会怎样
         self.server_port = 5500
         self.edge_ip_set = set()  # 存放所有边缘端的ip，用于向边缘端发送请求
         self.edge_port = 5500  # 边缘端服务器的端口号，所有边缘端统一
@@ -601,19 +601,18 @@ class ServerManager(object):
 
         return res
 
-
 class ServerAppConfig(object):
     # flask定时任务的配置类
     JOBS = [
         {
             'id': 'job1',
-            'func': 'app_server:trigger_update_server_status',
+            'func': 'app_server_test:trigger_update_server_status',
             'trigger': 'interval',  # 间隔触发
             'seconds': 11,  # 定时器时间间隔
         },
         {
             'id': 'job2',
-            'func': 'app_server:trigger_update_clients_status',
+            'func': 'app_server_test:trigger_update_clients_status',
             'trigger': 'interval',  # 间隔触发
             'seconds': 17,  # 定时器时间间隔
         }
@@ -636,8 +635,7 @@ def edit_json():
 @app.route("/dist/<path:path>")
 def send_dist(path):
     return send_from_directory("dist", path)
-
-
+'''
 @app.route('/upload-json-and-codefiles-api', methods=['POST'])
 def upload_json_and_codefiles_api():
     try:
@@ -680,7 +678,7 @@ def upload_json_and_codefiles_api():
         res.headers['Access-Control-Allow-Origin'] = "*"
         res.headers['Access-Control-Allow-Methods'] = 'PUT,GET,POST,DELETE'
         return res
-
+'''
 
 @app.route("/register_edge")
 def register_edge():
@@ -967,6 +965,7 @@ def get_cluster_info():
     return jsonify(cluster_info)
 
 
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--server_ip', dest='server_ip', type=str, default='127.0.0.1')
@@ -980,5 +979,22 @@ if __name__ == '__main__':
     scheduler = APScheduler()  # 利用APScheduler启动定时任务
     scheduler.init_app(app)
     scheduler.start()
+
+
+    #自动启动服务进程，无需接收用户上传提交代码文件。需要读取json并使用。SchedulingSyetem目录之下已经有响应模型，不需要再接收下装了。
+    #打开json文件，自动创建进程
+    with open('car_detection_new.json') as f:
+        task_dict = json.load(f)
+    print(type(task_dict))
+    print(task_dict.keys())
+    print(task_dict)
+    server_manager.create_task_process(task_dict)
+    #打开json文件，自动创建进程
+    with open('face_pose_estimation_new.json') as f:
+        task_dict = json.load(f)
+    print(type(task_dict))
+    print(task_dict.keys())
+    print(task_dict)
+    server_manager.create_task_process(task_dict)
 
     app.run(host=server_manager.server_ip, port=server_manager.server_port)

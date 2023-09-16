@@ -1,0 +1,19 @@
+{
+    "name": "face_pose_estimation",  
+    "flow": ["face_detection", "face_alignment"],
+    "model_ctx": {  
+        "face_detection": {
+            "net_type": "mb_tiny_RFB_fd",
+            "input_size": 480,
+            "threshold": 0.7,
+            "candidate_size": 1500,
+            "device": "cpu"
+        },
+        "face_alignment": {
+            "lite_version": 1,
+            "model_path": "models/hopenet_lite_6MB.pkl",
+            "batch_size": 1,
+            "device": "cpu"
+        }
+    } 
+}
