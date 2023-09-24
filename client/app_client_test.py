@@ -85,7 +85,7 @@ def work_func(task_name, q_input, q_output, model_ctx=None):
     for name_split in task_name_split:
         temp_name = name_split.capitalize()   # 各个字符串的首字母大写
         task_class_name = task_class_name + temp_name
-
+    print("启动服务",task_name)
     # 使用importlib动态加载任务对应的类
     path1 = os.path.abspath('.')
     path2 = os.path.join(path1, task_name)
@@ -218,9 +218,9 @@ class ClientManager(object):
     def __init__(self):
         # 边端系统参数相关
         self.server_ip = '114.212.81.11'  # 服务器服务端的ip和端口号
-        self.server_port = 5500
+        self.server_port = 6500
         self.edge_ip = '127.0.0.1'  # 默认设置为127.0.0.1，供定时事件使用
-        self.edge_port = 5500
+        self.edge_port = 6500
         self.register_path = "/register_edge"  # 向服务器注册边缘端的接口
         self.server_ssh_port = 22   # 服务端接受ssh连接的端口
         self.server_ssh_username = 'guest'  # 服务端ssh连接的用户名和密码
@@ -586,7 +586,7 @@ class ClientAppConfig(object):
     JOBS = [
         {
             'id': 'job1',
-            'func': 'app_client:trigger_update_client_status',
+            'func': 'app_client_test:trigger_update_client_status',
             'trigger': 'interval',  # 间隔触发
             'seconds': 11,  # 定时器时间间隔
         }
@@ -836,5 +836,54 @@ if __name__ == '__main__':
     scheduler = APScheduler()  # 利用APScheduler启动定时任务
     scheduler.init_app(app)
     scheduler.start()
+
+    #自动启动服务进程，无需接收用户上传提交代码文件。需要读取json并使用。SchedulingSyetem目录之下已经有响应模型，不需要再接收下装了。
+    #打开json文件，自动创建进程
+    import json
+    json_data=' \
+    { \
+        "name": "car_detection",  \
+        "flow": ["car_detection"],\
+        "model_ctx": {  \
+            "car_detection": {\
+                "weights": "yolov5s.pt",\
+                "device": "cuda:0"\
+            }\
+        }  \
+    }\
+    '
+    task_dict=json.loads(json_data)
+    print(type(task_dict))
+    print(task_dict.keys())
+    print(task_dict)
+    client_manager.create_task_process(task_dict)
+    #打开json文件，自动创建进程
+
+    json_data='\
+    {\
+        "name": "face_pose_estimation",  \
+        "flow": ["face_detection", "face_alignment"],\
+        "model_ctx": {  \
+            "face_detection": {\
+                "net_type": "mb_tiny_RFB_fd",\
+                "input_size": 480,\
+                "threshold": 0.7,\
+                "candidate_size": 1500,\
+                "device": "cuda:0"\
+            },\
+            "face_alignment": {\
+                "lite_version": 1,\
+                "model_path": "models/hopenet_lite_6MB.pkl",\
+                "batch_size": 1,\
+                "device": "cuda:0"\
+            }\
+        } \
+    }\
+    '
+    task_dict=json.loads(json_data)
+    print(type(task_dict))
+    print(task_dict.keys())
+    print(task_dict)
+    client_manager.create_task_process(task_dict)
 
     app.run(host=client_manager.edge_ip, port=client_manager.edge_port)

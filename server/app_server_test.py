@@ -22,14 +22,13 @@ def work_func(task_name, q_input, q_output, model_ctx=None):
     for name_split in task_name_split:
         temp_name = name_split.capitalize()   # 各个字符串的首字母大写
         task_class_name = task_class_name + temp_name
-    print("开始执行进程提供服务：",task_class_name)
+    print("启动服务",task_name)
     # 使用importlib动态加载任务对应的类
     path1 = os.path.abspath('.')
     path2 = os.path.join(path1, task_name)
     path3 = os.path.join(path2, '')
-    #sys.path.append(path3)   # 当前任务代码所在的文件夹，并将其加入模块导入搜索路径
+    sys.path.append(path3)   # 当前任务代码所在的文件夹，并将其加入模块导入搜索路径
     module_path = task_name + '.' + task_name  # 绝对导入
-    print("路径是",path3,module_path)
     module_name = importlib.import_module(module_path)  # 加载模块，例如face_detection
     class_obj = getattr(module_name, task_class_name)  # 从模块中加载执行类，例如FaceDetection
 
@@ -221,9 +220,9 @@ class ServerManager(object):
         # 云端系统配置相关
         self.server_ip = '114.212.81.11'  # 默认设置需要与服务器ip保持一致，供定时事件使用
         #self.server_ip = '127.0.0.1'  # 如果这样设置会怎样
-        self.server_port = 5500
+        self.server_port = 6500
         self.edge_ip_set = set()  # 存放所有边缘端的ip，用于向边缘端发送请求
-        self.edge_port = 5500  # 边缘端服务器的端口号，所有边缘端统一
+        self.edge_port = 6500  # 边缘端服务器的端口号，所有边缘端统一
         self.edge_get_task_url = "/task-register"  # 边缘端接受软件下装的接口
         self.server_codebase = os.path.join(os.path.abspath('.'), "")   # 为了导入工作进程代码，需要将代码下载到当前工作目录下
 
@@ -601,6 +600,7 @@ class ServerManager(object):
 
         return res
 
+
 class ServerAppConfig(object):
     # flask定时任务的配置类
     JOBS = [
@@ -965,7 +965,6 @@ def get_cluster_info():
     return jsonify(cluster_info)
 
 
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--server_ip', dest='server_ip', type=str, default='127.0.0.1')
@@ -980,18 +979,50 @@ if __name__ == '__main__':
     scheduler.init_app(app)
     scheduler.start()
 
-
     #自动启动服务进程，无需接收用户上传提交代码文件。需要读取json并使用。SchedulingSyetem目录之下已经有响应模型，不需要再接收下装了。
     #打开json文件，自动创建进程
-    with open('car_detection_new.json') as f:
-        task_dict = json.load(f)
+    import json
+    json_data=' \
+    { \
+        "name": "car_detection",  \
+        "flow": ["car_detection"],\
+        "model_ctx": {  \
+            "car_detection": {\
+                "weights": "yolov5s.pt",\
+                "device": "cuda:0"\
+            }\
+        }  \
+    }\
+    '
+    task_dict=json.loads(json_data)
     print(type(task_dict))
     print(task_dict.keys())
     print(task_dict)
     server_manager.create_task_process(task_dict)
     #打开json文件，自动创建进程
-    with open('face_pose_estimation_new.json') as f:
-        task_dict = json.load(f)
+
+    json_data='\
+    {\
+        "name": "face_pose_estimation",  \
+        "flow": ["face_detection", "face_alignment"],\
+        "model_ctx": {  \
+            "face_detection": {\
+                "net_type": "mb_tiny_RFB_fd",\
+                "input_size": 480,\
+                "threshold": 0.7,\
+                "candidate_size": 1500,\
+                "device": "cuda:0"\
+            },\
+            "face_alignment": {\
+                "lite_version": 1,\
+                "model_path": "models/hopenet_lite_6MB.pkl",\
+                "batch_size": 1,\
+                "device": "cuda:0"\
+            }\
+        } \
+    }\
+    '
+    task_dict=json.loads(json_data)
     print(type(task_dict))
     print(task_dict.keys())
     print(task_dict)
