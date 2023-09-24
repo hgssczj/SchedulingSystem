@@ -218,9 +218,9 @@ class ClientManager(object):
     def __init__(self):
         # 边端系统参数相关
         self.server_ip = '114.212.81.11'  # 服务器服务端的ip和端口号
-        self.server_port = 5500
+        self.server_port = 6500
         self.edge_ip = '127.0.0.1'  # 默认设置为127.0.0.1，供定时事件使用
-        self.edge_port = 5500
+        self.edge_port = 6500
         self.register_path = "/register_edge"  # 向服务器注册边缘端的接口
         self.server_ssh_port = 22   # 服务端接受ssh连接的端口
         self.server_ssh_username = 'guest'  # 服务端ssh连接的用户名和密码
