@@ -1,0 +1,22 @@
+{
+    "name": "car_detection",  
+    "flow": ["car_detection"],
+    "model_ctx": {  
+        "car_detection": {
+            "weights": "yolov5s.pt",
+            "device": "cpu"
+        }
+    },
+    "input_ctx": {  
+        "car_detection": ["image"]
+    },
+    "output_ctx": {  
+        "car_detection": ["image", "result"]
+    },
+    "task_code_path": { 
+        "car_detection" : "/app/face_detection"
+    },
+    "Accuracy": 0.6,  
+    "Latency": 0.5,  
+    "priority": 0  
+}
