@@ -1,24 +1,23 @@
 # SchedulingSystem
-以下为main-demo分支的新增说明。
+以下为main-test分支的新增说明。
 
-本工程为mian-demo分支下的代码，相比最初的mian-render版本，进行了如下改动：
+本工程为mian-test分支下的代码。 main-demo版本作为稳定的可展示版本发布，而main-test版本作为最新的探索版本发布，不稳定。
 
-（1）修改了`app_server.py`和`app_client.py`中ServerManager和ClientManager的__init__方法中对server_port和edge_port端口的初始化为6500，目的是和no-render-demo分支下的新端口进行匹配。
+相比mian-demo版本，进行了如下改动：
 
-（2）新建了`app_server_test.py`和`app_client_test.py`，二者相比原来的`app_server.py`和`app_client.py`，区别在于不需要进行软件下装，直接运行就可以根据写好的配置启动服务。仅用于测试，不用于实际。当前client和server目录下有car_detection等目录，就是为了给`app_server_test.py`和`app_client_test.py`提供无需下装的服务，请勿删除，
-
-（3）新增了“下装代码-新版”目录，内含下装时需要的zip压缩包和配置文件。注意，为加快运行速度，建议使用face_pose_estimation_new_cuda.json和car_detection_new_cuda.json
+（1）修改了`app_server.py`和`app_client.py`中ServerManager和ClientManager的__init__方法中对server_port和edge_port端口的初始化为7500，目的是和no-render-test分支下的新端口进行匹配。
 
 
-本工程最好结合video-dag-manager下no-render-demo的query_manager_v2.py和job_manager_v2.py使用。如果不愿意使用6500作为端口，使用本工程代码时需要修改`app_server.py`和`app_client.py`中ServerManager和ClientManager的__init__方法中对server_port和edge_port端口的初始化。本人并不建议进行这样的修改。
+
+本工程最好结合video-dag-manager下no-render-demo的query_manager_v2.py和job_manager_v2.py使用。如果不愿意使用7500作为端口，使用本工程代码时需要修改`app_server.py`和`app_client.py`中ServerManager和ClientManager的__init__方法中对server_port和edge_port端口的初始化。本人并不建议进行这样的修改。
 
 建议启动方法（不修改上文所说的这些初始化端口的前提下）：
 
 首先执行sudo systemctl restart jtop.service，防止执行过程中服务未响应。
 
-如果是在云端，运行python3.8 SchedulingSystem-main-demo/SchedulingSystem/server/app_server.py --server_ip=114.212.81.11 --server_port=6500 --edge_port=6500
+如果是在云端，运行python3.8 SchedulingSystem-main-demo/SchedulingSystem/server/app_server.py --server_ip=114.212.81.11 --server_port=7500 --edge_port=7500
 
-如果是在边缘端，运行python3 SchedulingSystem-main-demo/SchedulingSystem/client/app_client.py --server_ip=114.212.81.11 --server_port=6500 --edge_ip=0.0.0.0 --edge_port=6500
+如果是在边缘端，运行python3 SchedulingSystem-main-demo/SchedulingSystem/client/app_client.py --server_ip=114.212.81.11 --server_port=7500 --edge_ip=0.0.0.0 --edge_port=7500
 
 以下为main版本的原始readme内容。
 ### 1 大致结构
