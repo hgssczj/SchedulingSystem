@@ -220,9 +220,9 @@ class ServerManager(object):
         # 云端系统配置相关
         self.server_ip = '114.212.81.11'  # 默认设置需要与服务器ip保持一致，供定时事件使用
         #self.server_ip = '127.0.0.1'  # 如果这样设置会怎样
-        self.server_port = 7500
+        self.server_port = 6500
         self.edge_ip_set = set()  # 存放所有边缘端的ip，用于向边缘端发送请求
-        self.edge_port = 7500  # 边缘端服务器的端口号，所有边缘端统一
+        self.edge_port = 6500  # 边缘端服务器的端口号，所有边缘端统一
         self.edge_get_task_url = "/task-register"  # 边缘端接受软件下装的接口
         self.server_codebase = os.path.join(os.path.abspath('.'), "")   # 为了导入工作进程代码，需要将代码下载到当前工作目录下
 
