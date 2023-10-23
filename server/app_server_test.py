@@ -220,9 +220,9 @@ class ServerManager(object):
         # 云端系统配置相关
         self.server_ip = '114.212.81.11'  # 默认设置需要与服务器ip保持一致，供定时事件使用
         #self.server_ip = '127.0.0.1'  # 如果这样设置会怎样
-        self.server_port = 6500
+        self.server_port = 7500
         self.edge_ip_set = set()  # 存放所有边缘端的ip，用于向边缘端发送请求
-        self.edge_port = 6500  # 边缘端服务器的端口号，所有边缘端统一
+        self.edge_port = 7500  # 边缘端服务器的端口号，所有边缘端统一
         self.edge_get_task_url = "/task-register"  # 边缘端接受软件下装的接口
         self.server_codebase = os.path.join(os.path.abspath('.'), "")   # 为了导入工作进程代码，需要将代码下载到当前工作目录下
 
@@ -248,6 +248,7 @@ class ServerManager(object):
             'cpu_util_limit': 1.0
         }
         self.resource_limit_dict = dict()  # 记录各类任务各类资源的使用上限，用于在创建新进程时使用，key为任务名，value为dict
+        self.dag_workflows = []  # 记录所有的DAG套餐
 
     # 云端设置相关
     def init_server_param(self, server_ip, server_port, edge_port):
@@ -470,6 +471,7 @@ class ServerManager(object):
     def update_server_status(self):
         self.server_status['cpu_ratio'] = psutil.cpu_percent(interval=None, percpu=False)  # 所有cpu的使用率
         self.server_status['n_cpu'] = self.cpu_count
+        self.server_status['mem_total'] = psutil.virtual_memory().total / 1024 / 1024 / 1024
         self.server_status['mem_ratio'] = psutil.virtual_memory().percent
 
         self.server_status['swap_ratio'] = psutil.swap_memory().percent
@@ -483,19 +485,21 @@ class ServerManager(object):
 
         # 获取GPU使用情况
         # 不同类型设备的GPU使用方式不同，统计方式也不同
-        gpu_mem = dict()
-        gpu_utilization = dict()
+        gpu_mem_total = dict()
+        gpu_mem_utilization = dict()
+        gpu_compute_utilization = dict()
         if platform.uname().machine[0:5] == 'aarch':
             from jtop import jtop
             with jtop() as jetson:
                 while jetson.ok():
-                    gpu_utilization['0'] = jetson.stats['GPU']  # 计算负载百分比，5，7
+                    gpu_compute_utilization['0'] = jetson.stats['GPU']  # 计算负载百分比，5，7
                     gpu_total_mem = 3.9 * 1024 * 1024   # nano显存总量为3.9G，未找到获取显存总量的api，直接写死，单位kB
+                    gpu_mem_total['0'] = 3.9
                     process_list = jetson.processes
                     gpu_used_mem = 0
                     for pro in process_list:
                         gpu_used_mem += pro[-2]  # 进程占用的显存大小，单位kB
-                    gpu_mem['0'] = gpu_used_mem / gpu_total_mem * 100  # 百分比
+                    gpu_mem_utilization['0'] = gpu_used_mem / gpu_total_mem * 100  # 百分比
                     break
         else:
             import pynvml
@@ -504,11 +508,13 @@ class ServerManager(object):
             for i in range(gpu_device_count):
                 handle = pynvml.nvmlDeviceGetHandleByIndex(i)  # 获取GPU i的handle，后续通过handle来处理
                 memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)  # 通过handle获取GPU i的信息
-                gpu_mem[str(i)] = memory_info.used / memory_info.total * 100  # GPU i的显存占用比例
-                gpu_utilization[str(i)] = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu  # GPU i 计算能力的使用率，百分比
+                gpu_mem_utilization[str(i)] = memory_info.used / memory_info.total * 100  # GPU i的显存占用比例
+                gpu_compute_utilization[str(i)] = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu  # GPU i 计算能力的使用率，百分比
+                gpu_mem_total[str(i)] = memory_info.total / 1024 / 1024 / 1024
             pynvml.nvmlShutdown()  # 最后关闭管理工具
-        self.server_status['gpu_mem'] = gpu_mem
-        self.server_status['gpu_utilization'] = gpu_utilization
+        self.server_status['gpu_mem_utilization'] = gpu_mem_utilization
+        self.server_status['gpu_compute_utilization'] = gpu_compute_utilization
+        self.server_status['gpu_mem_total'] = gpu_mem_total
 
         # 更新云端各类工作进程的信息
         '''
@@ -635,7 +641,21 @@ def edit_json():
 @app.route("/dist/<path:path>")
 def send_dist(path):
     return send_from_directory("dist", path)
-'''
+    
+    
+# TODO: 获取现有的所有套餐
+@app.route("/get-dag-workflows-api", methods=['GET'])
+def get_dag_workflows_api():
+    return jsonify(server_manager.dag_workflows)
+
+@app.route("/update-dag-workflows-api", methods=['POST'])
+def update_dag_workflows_api():
+    new_dag_workflows = json.loads(request.get_data(as_text=True))
+    print(new_dag_workflows)
+    server_manager.dag_workflows = new_dag_workflows
+    return jsonify(server_manager.dag_workflows)
+
+
 @app.route('/upload-json-and-codefiles-api', methods=['POST'])
 def upload_json_and_codefiles_api():
     try:
@@ -678,7 +698,7 @@ def upload_json_and_codefiles_api():
         res.headers['Access-Control-Allow-Origin'] = "*"
         res.headers['Access-Control-Allow-Methods'] = 'PUT,GET,POST,DELETE'
         return res
-'''
+
 
 @app.route("/register_edge")
 def register_edge():

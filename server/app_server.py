@@ -247,6 +247,7 @@ class ServerManager(object):
             'cpu_util_limit': 1.0
         }
         self.resource_limit_dict = dict()  # 记录各类任务各类资源的使用上限，用于在创建新进程时使用，key为任务名，value为dict
+        self.dag_workflows = []  # 记录所有的DAG套餐
 
     # 云端设置相关
     def init_server_param(self, server_ip, server_port, edge_port):
@@ -639,6 +640,19 @@ def edit_json():
 @app.route("/dist/<path:path>")
 def send_dist(path):
     return send_from_directory("dist", path)
+    
+    
+# TODO: 获取现有的所有套餐
+@app.route("/get-dag-workflows-api", methods=['GET'])
+def get_dag_workflows_api():
+    return jsonify(server_manager.dag_workflows)
+
+@app.route("/update-dag-workflows-api", methods=['POST'])
+def update_dag_workflows_api():
+    new_dag_workflows = json.loads(request.get_data(as_text=True))
+    print(new_dag_workflows)
+    server_manager.dag_workflows = new_dag_workflows
+    return jsonify(server_manager.dag_workflows)
 
 
 @app.route('/upload-json-and-codefiles-api', methods=['POST'])
