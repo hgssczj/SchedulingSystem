@@ -218,9 +218,9 @@ class ClientManager(object):
     def __init__(self):
         # 边端系统参数相关
         self.server_ip = '114.212.81.11'  # 服务器服务端的ip和端口号
-        self.server_port = 7500
+        self.server_port = 5500
         self.edge_ip = '127.0.0.1'  # 默认设置为127.0.0.1，供定时事件使用
-        self.edge_port = 7500
+        self.edge_port = 5500
         self.register_path = "/register_edge"  # 向服务器注册边缘端的接口
         self.server_ssh_port = 22   # 服务端接受ssh连接的端口
         self.server_ssh_username = 'guest'  # 服务端ssh连接的用户名和密码
@@ -844,7 +844,9 @@ if __name__ == '__main__':
 
     #自动启动服务进程，无需接收用户上传提交代码文件。需要读取json并使用。SchedulingSyetem目录之下已经有响应模型，不需要再接收下装了。
     #打开json文件，自动创建进程
+    
     import json
+    ''' #不再运行车俩检测进程
     json_data=' \
     { \
         "name": "car_detection",  \
@@ -863,6 +865,7 @@ if __name__ == '__main__':
     print(task_dict)
     client_manager.create_task_process(task_dict)
     #打开json文件，自动创建进程
+    '''
 
     json_data='\
     {\
