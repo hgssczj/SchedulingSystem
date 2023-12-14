@@ -361,7 +361,7 @@ class ClientManager(object):
                 cpu_resource_item = "cpu"
                 cpu_limit_obj = t.get_node_by_path("/{0}/".format(cpu_resource_item))
                 cpu_group = cpu_limit_obj.create_cgroup(group_name)
-                cpu_group.controller.cfs_period_us = 1000000
+                cpu_group.controller.cfs_period_us = 100000
                 cpu_group.controller.cfs_quota_us = int(self.default_resource_limit['cpu_util_limit'] * cpu_group.controller.cfs_period_us *
                                                         psutil.cpu_count())
                 cpu_group.controller.tasks = task_set
@@ -509,6 +509,8 @@ class ClientManager(object):
 
     def limit_task_resource(self, task_resource_info):
         task_name = task_resource_info['task_name']
+        print("当前限制针对",task_name)
+        print("当前服务类型",self.code_set)
         if task_name in self.code_set:
             if 'cpu_util_limit' in task_resource_info and task_resource_info['cpu_util_limit'] > 0:
                 for process_obj in self.process_dict[task_name]:
@@ -525,6 +527,8 @@ class ClientManager(object):
                 assert task_name in self.resource_limit_dict
                 self.resource_limit_dict[task_name]['mem_util_limit'] = task_resource_info[
                     'mem_util_limit']
+            print("展示更新后的资源限制")
+            print(self.resource_limit_dict)
             return True
         else:
             return False
@@ -813,8 +817,11 @@ def limit_process_resource():
 @app.route('/limit_task_resource', methods=['POST'])
 def limit_task_resource():
     task_resource_info = request.get_json()
+    print("接收到资源限制操作")
+    print(task_resource_info)
     limit_res = dict()
     limit_res['limit_flag'] = client_manager.limit_task_resource(task_resource_info)
+    print(limit_res)
     return jsonify(limit_res)
 
 
@@ -894,6 +901,9 @@ if __name__ == '__main__':
         } \
     }\
     '
+
+    client_manager.code_set.add("face_detection")
+    client_manager.code_set.add("face_alignment")
     task_dict=json.loads(json_data)
     print(type(task_dict))
     print(task_dict.keys())

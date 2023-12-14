@@ -305,7 +305,7 @@ class ServerManager(object):
                 cpu_resource_item = "cpu"
                 cpu_limit_obj = t.get_node_by_path("/{0}/".format(cpu_resource_item))
                 cpu_group = cpu_limit_obj.create_cgroup(group_name)
-                cpu_group.controller.cfs_period_us = 1000000
+                cpu_group.controller.cfs_period_us = 100000
                 cpu_group.controller.cfs_quota_us = int(self.default_resource_limit['cpu_util_limit'] * cpu_group.controller.cfs_period_us *
                                                         psutil.cpu_count())
                 cpu_group.controller.tasks = task_set
@@ -778,7 +778,7 @@ def execute_task(task_name):
         output_ctx['execute_flag'] = True
     else:
         output_ctx['execute_flag'] = False
-    print("返回计算完毕的结果")
+    # print("返回计算完毕的结果")
     return jsonify(output_ctx)
 
 
@@ -931,8 +931,11 @@ def limit_process_resource():
 @app.route('/limit_task_resource', methods=['POST'])
 def limit_task_resource():
     task_resource_info = request.get_json()
+    print("接收到资源限制操作")
+    print(task_resource_info)
     limit_res = dict()
     limit_res['limit_flag'] = server_manager.limit_task_resource(task_resource_info)
+    print(limit_res)
     return jsonify(limit_res)
 
 
@@ -1045,6 +1048,8 @@ if __name__ == '__main__':
         } \
     }\
     '
+    server_manager.code_set.add("face_detection")
+    server_manager.code_set.add("face_alignment")
     task_dict=json.loads(json_data)
     print(type(task_dict))
     print(task_dict.keys())
