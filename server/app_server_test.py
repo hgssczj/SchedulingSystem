@@ -513,18 +513,19 @@ class ServerManager(object):
         return service_list
 
     def update_server_status(self):
-        self.server_status['cpu_ratio'] = psutil.cpu_percent(interval=None, percpu=False)  # 所有cpu的使用率
-        self.server_status['n_cpu'] = self.cpu_count
-        self.server_status['mem_total'] = psutil.virtual_memory().total / 1024 / 1024 / 1024
-        self.server_status['mem_ratio'] = psutil.virtual_memory().percent
+        self.server_status['device_state'] = dict()  # 记录设备层面的资源使用情况
+        self.server_status['device_state']['cpu_ratio'] = psutil.cpu_percent(interval=None, percpu=False)  # 所有cpu的使用率
+        self.server_status['device_state']['n_cpu'] = self.cpu_count
+        self.server_status['device_state']['mem_total'] = psutil.virtual_memory().total / 1024 / 1024 / 1024
+        self.server_status['device_state']['mem_ratio'] = psutil.virtual_memory().percent
 
-        self.server_status['swap_ratio'] = psutil.swap_memory().percent
+        self.server_status['device_state']['swap_ratio'] = psutil.swap_memory().percent
         # 发起请求时再对网络情况进行采样
         old_net_bytes = psutil.net_io_counters().bytes_sent + psutil.net_io_counters().bytes_recv
         sec_interval = 0.3
         time.sleep(sec_interval)
         new_net_bytes = psutil.net_io_counters().bytes_sent + psutil.net_io_counters().bytes_recv
-        self.server_status['net_ratio(MBps)'] = round((new_net_bytes - old_net_bytes) / (1024.0 * 1024)
+        self.server_status['device_state']['net_ratio(MBps)'] = round((new_net_bytes - old_net_bytes) / (1024.0 * 1024)
                                                                 / sec_interval, 5)
 
         # 获取GPU使用情况
@@ -556,27 +557,15 @@ class ServerManager(object):
                 gpu_compute_utilization[str(i)] = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu  # GPU i 计算能力的使用率，百分比
                 gpu_mem_total[str(i)] = memory_info.total / 1024 / 1024 / 1024
             pynvml.nvmlShutdown()  # 最后关闭管理工具
-        self.server_status['gpu_mem_utilization'] = gpu_mem_utilization
-        self.server_status['gpu_compute_utilization'] = gpu_compute_utilization
-        self.server_status['gpu_mem_total'] = gpu_mem_total
+        self.server_status['device_state']['gpu_mem_utilization'] = gpu_mem_utilization
+        self.server_status['device_state']['gpu_compute_utilization'] = gpu_compute_utilization
+        self.server_status['device_state']['gpu_mem_total'] = gpu_mem_total
 
         # 更新云端各类工作进程的信息
-        '''
-        for task_name in self.process_dict.keys():
-            task_info = dict()  # 关于某一类服务的所有信息
-            task_process_list = self.process_dict[task_name]  # 执行某一类服务的所有进程
-            for index in range(len(task_process_list)):
-                temp_pid = task_process_list[index].pid
-                temp_process_info = dict()  # 当前工作进程的信息
-                # 当前工作进程的cpu、内存占用率
-                temp_p = psutil.Process(temp_pid)
-                temp_process_info['cpu_ratio'] = temp_p.cpu_percent(interval=0.5)
-                temp_process_info['mem_ratio'] = temp_p.memory_percent()
-                # 当前工作进程未完成的任务数量
-                temp_process_info['task_to_do'] = self.input_queue_dict[task_name][index].qsize()
-                task_info[str(temp_pid)] = temp_process_info
-            self.server_status[task_name] = task_info
-        '''
+        self.server_status['service_state'] = dict()
+        for task_name, resource_limit in self.resource_limit_dict.items():
+            self.server_status['service_state'][task_name] = resource_limit
+        
         return self.server_status
 
     def get_server_status(self):
@@ -658,13 +647,13 @@ class ServerAppConfig(object):
             'id': 'job1',
             'func': 'app_server_test:trigger_update_server_status',
             'trigger': 'interval',  # 间隔触发
-            'seconds': 11,  # 定时器时间间隔
+            'seconds': 5,  # 定时器时间间隔
         },
         {
             'id': 'job2',
             'func': 'app_server_test:trigger_update_clients_status',
             'trigger': 'interval',  # 间隔触发
-            'seconds': 17,  # 定时器时间间隔
+            'seconds': 5,  # 定时器时间间隔
         }
     ]
     SCHEDULER_API_ENABLED = True

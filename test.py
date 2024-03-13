@@ -352,42 +352,31 @@ if __name__ == '__main__':
     plot_func(csv_path, csv_name, csv_dir)
 '''
 
-def pro_func():
-    a = 0
-    while True:
-        a += 1
-        time.sleep(5)
+
 
 
 if __name__ == '__main__':
-    temp_process = mp.Process(target=pro_func, args=())
-    temp_process.start()  # 必须先启动工作进程，只有启动之后temp_process才有pid，否则为None
+    json_data='\
+    {\
+        "name": "face_pose_estimation",  \
+        "flow": ["face_detection", "face_alignment"],\
+        "model_ctx": {  \
+            "face_detection": {\
+                "net_type": "mb_tiny_RFB_fd",\
+                "input_size": 480,\
+                "threshold": 0.7,\
+                "candidate_size": 1500,\
+                "device": "cuda:0"\
+            },\
+            "face_alignment": {\
+                "lite_version": 1,\
+                "model_path": "models/hopenet_lite_6MB.pkl",\
+                "batch_size": 1,\
+                "device": "cuda:0"\
+            }\
+        } \
+    }\
+    '
+    task_dict=json.loads(json_data)
+    
 
-    # 使用cgroupspy限制进程使用的资源
-    from cgroupspy import trees
-
-    task_set = set()
-    task_set.add(temp_process.pid)
-    group_name = "process_" + str(temp_process.pid)
-    t = trees.Tree()  # 实例化一个资源树
-
-    # 限制进程使用的内存上限
-    memory_resource_item = "memory"
-    memory_limit_obj = t.get_node_by_path("/{0}/".format(memory_resource_item))
-    memory_group = memory_limit_obj.create_cgroup(group_name)
-    # 进程初始时设置内存上限为可使用全部内存
-    memory_group.controller.limit_in_bytes = int(0.5 * psutil.virtual_memory().total)
-    memory_group.controller.tasks = task_set
-
-
-    # 限制进程的cpu使用率
-    cpu_resource_item = "cpu"
-    cpu_limit_obj = t.get_node_by_path("/{0}/".format(cpu_resource_item))
-    cpu_group = cpu_limit_obj.create_cgroup(group_name)
-    cpu_group.controller.cfs_period_us = 1000000
-    cpu_group.controller.cfs_quota_us = int(0.8 * cpu_group.controller.cfs_period_us *psutil.cpu_count())
-    cpu_group.controller.tasks = task_set
-
-    while True:
-        print("jjj")
-        time.sleep(2)

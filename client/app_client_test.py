@@ -205,7 +205,7 @@ def work_func(task_name, q_input, q_output, model_ctx=None):
         proc_resource_info = dict()  # 执行任务过程中的资源消耗情况
         proc_resource_info['pid'] = pid
         # 任务执行的cpu占用率，各个核上占用率之和的百分比->平均每个核的占用率，范围[0,1]
-        proc_resource_info['cpu_util_use'] = end_cpu_per / 100 / psutil.cpu_count()
+        proc_resource_info['cpu_util_use'] = (end_cpu_per - start_cpu_per) / 100 / psutil.cpu_count()
         proc_resource_info['mem_util_use'] = p.memory_percent(memtype='uss') / 100
         proc_resource_info['compute_latency'] = end_time - start_time  # 任务执行的延时，单位：秒(s)
 
@@ -568,18 +568,19 @@ class ClientManager(object):
 
     # 维护边端状态相关
     def update_client_status(self):
-        self.client_status['cpu_ratio'] = psutil.cpu_percent(interval=None, percpu=False)  # 所有cpu的使用率
-        self.client_status['n_cpu'] = self.cpu_count
-        self.client_status['mem_total'] = psutil.virtual_memory().total / 1024 / 1024 / 1024
-        self.client_status['mem_ratio'] = psutil.virtual_memory().percent
+        self.client_status['device_state'] = dict()  # 记录设备层面的资源使用情况
+        self.client_status['device_state']['cpu_ratio'] = psutil.cpu_percent(interval=None, percpu=False)  # 所有cpu的使用率
+        self.client_status['device_state']['n_cpu'] = self.cpu_count
+        self.client_status['device_state']['mem_total'] = psutil.virtual_memory().total / 1024 / 1024 / 1024
+        self.client_status['device_state']['mem_ratio'] = psutil.virtual_memory().percent
 
-        self.client_status['swap_ratio'] = psutil.swap_memory().percent
+        self.client_status['device_state']['swap_ratio'] = psutil.swap_memory().percent
         # 发起请求时再对网络情况进行采样
         old_net_bytes = psutil.net_io_counters().bytes_sent + psutil.net_io_counters().bytes_recv
         sec_interval = 0.3
         time.sleep(sec_interval)
         new_net_bytes = psutil.net_io_counters().bytes_sent + psutil.net_io_counters().bytes_recv
-        self.client_status['net_ratio(MBps)'] = round((new_net_bytes - old_net_bytes) / (1024.0 * 1024)
+        self.client_status['device_state']['net_ratio(MBps)'] = round((new_net_bytes - old_net_bytes) / (1024.0 * 1024)
                                                                 / sec_interval, 5)
 
         # 获取GPU使用情况
@@ -611,28 +612,15 @@ class ClientManager(object):
                 gpu_mem_utilization[str(i)] = memory_info.used / memory_info.total * 100  # GPU i的显存占用比例
                 gpu_compute_utilization[str(i)] = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu  # GPU i 计算能力的使用率，
             pynvml.nvmlShutdown()  # 最后关闭管理工具
-        self.client_status['gpu_mem_utilization'] = gpu_mem_utilization
-        self.client_status['gpu_compute_utilization'] = gpu_compute_utilization
-        self.client_status['gpu_mem_total'] = gpu_mem_total
+        self.client_status['device_state']['gpu_mem_utilization'] = gpu_mem_utilization
+        self.client_status['device_state']['gpu_compute_utilization'] = gpu_compute_utilization
+        self.client_status['device_state']['gpu_mem_total'] = gpu_mem_total
 
         # 更新边缘端各类工作进程的信息
-        # print(server_manager.process_dict)
-        '''
-        for task_name in client_manager.process_dict.keys():
-            task_info = dict()  # 关于某一类服务的所有信息
-            task_process_list = client_manager.process_dict[task_name]  # 执行某一类服务的所有进程
-            for index in range(len(task_process_list)):
-                temp_pid = task_process_list[index].pid
-                temp_process_info = dict()  # 当前工作进程的信息
-                # 当前工作进程的cpu、内存占用率
-                temp_p = psutil.Process(temp_pid)
-                temp_process_info['cpu_ratio'] = temp_p.cpu_percent(interval=0.5)
-                temp_process_info['mem_ratio'] = temp_p.memory_percent()
-                # 当前工作进程未完成的任务数量
-                temp_process_info['task_to_do'] = client_manager.input_queue_dict[task_name][index].qsize()
-                task_info[str(temp_pid)] = temp_process_info
-            client_manager.client_status[task_name] = task_info
-        '''
+        self.client_status['service_state'] = dict()
+        for task_name, resource_limit in self.resource_limit_dict.items():
+            self.client_status['service_state'][task_name] = resource_limit
+        
         return self.client_status
 
     def get_client_status(self):
@@ -646,7 +634,7 @@ class ClientAppConfig(object):
             'id': 'job1',
             'func': 'app_client_test:trigger_update_client_status',
             'trigger': 'interval',  # 间隔触发
-            'seconds': 11,  # 定时器时间间隔
+            'seconds': 3,  # 定时器时间间隔
         }
     ]
     SCHEDULER_API_ENABLED = True
