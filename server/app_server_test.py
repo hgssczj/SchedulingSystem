@@ -647,13 +647,13 @@ class ServerAppConfig(object):
             'id': 'job1',
             'func': 'app_server_test:trigger_update_server_status',
             'trigger': 'interval',  # 间隔触发
-            'seconds': 5,  # 定时器时间间隔
+            'seconds': 3,  # 定时器时间间隔
         },
         {
             'id': 'job2',
             'func': 'app_server_test:trigger_update_clients_status',
             'trigger': 'interval',  # 间隔触发
-            'seconds': 5,  # 定时器时间间隔
+            'seconds': 3,  # 定时器时间间隔
         }
     ]
     SCHEDULER_API_ENABLED = True

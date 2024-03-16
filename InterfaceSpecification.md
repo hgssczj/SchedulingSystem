@@ -308,6 +308,7 @@ res = ["face_detection", "face_alignment", "car_detection"]
         "device_state": {
             "cpu_ratio": [0.2, 0.0, 0.2, 0.1, 0.3, 0.2, 0.0, 0.7, 0.9],  //节点各个cpu的占用百分比列表
             "mem_ratio": 5.4,  //节点的内存占用百分比
+            "mem_total": 1000, //节点的内存总量，以GB为单位
             "net_ratio(MBps)": 0.31806,  //节点的带宽
             "swap_ratio": 0.0, //节点交换内存使用情况
             "gpu_mem":  {  //节点各个GPU的显存占用百分比字典
