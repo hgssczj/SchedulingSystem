@@ -871,7 +871,7 @@ if __name__ == '__main__':
     client_manager.create_task_process(task_dict)
     #打开json文件，自动创建进程
     '''
-
+    '''
     json_data='\
     {\
         "name": "face_pose_estimation",  \
@@ -891,6 +891,13 @@ if __name__ == '__main__':
                 "device": "cuda:0"\
             }\
         } \
+    }\
+    '
+    '''
+    json_data='\
+    {\
+        "name": "gender_classify_job",  \
+        "flow": ["face_detection", "gender_classification"]\
     }\
     '
 

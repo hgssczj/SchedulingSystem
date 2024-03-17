@@ -8,6 +8,7 @@ class GenderClassification:
         
         # 加载性别分类器
         self.gender_model = cv2.dnn.readNetFromCaffe('deploy_gender.prototxt', 'gender_net.caffemodel')
+        print("完成性别分类器初始化")
         
         os.chdir(ori_dir)
     

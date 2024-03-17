@@ -1044,7 +1044,7 @@ if __name__ == '__main__':
     json_data='\
     {\
         "name": "gender_classify_job",  \
-        "flow": ["face_detection", "face_alignment"]\
+        "flow": ["face_detection", "gender_classification"]\
     }\
     '
     
