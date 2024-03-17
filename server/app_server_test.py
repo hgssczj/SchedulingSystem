@@ -1037,11 +1037,12 @@ if __name__ == '__main__':
         } \
     }\
     '''
-    json_data=\
+    json_data='\
     {\
         "name": "gender_classify_job",  \
-        "flow": ["face_detection", "face_alignment"],\
+        "flow": ["face_detection", "face_alignment"]\
     }\
+    '
     
     server_manager.code_set.add("face_detection")
     server_manager.code_set.add("gender_classification")
