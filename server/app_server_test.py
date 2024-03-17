@@ -264,14 +264,18 @@ class ServerManager(object):
             if task_name not in self.process_dict:  # 只有边缘节点没有当前任务的工作进程时才创建一个工作进程
                 temp_input_q = mp.Queue(maxsize=10)
                 temp_output_q = mp.Queue(maxsize=10)
-                temp_process = mp.Process(target=work_func, args=(task_name, temp_input_q, temp_output_q,
-                                                                  task_dict['model_ctx'][task_name]))
+                if 'model_ctx' not in task_dict or task_name not in task_dict['model_ctx']:
+                    temp_process = mp.Process(target=work_func, args=(task_name, temp_input_q, temp_output_q))
+                    self.model_ctx_dict[task_name] = None
+                else:
+                    temp_process = mp.Process(target=work_func, args=(task_name, temp_input_q, temp_output_q,
+                                                                    task_dict['model_ctx'][task_name]))
+                    self.model_ctx_dict[task_name] = task_dict['model_ctx'][task_name]
                 self.process_dict[task_name] = [temp_process]
                 self.input_queue_dict[task_name] = [temp_input_q]
                 self.output_queue_dict[task_name] = [temp_output_q]
                 temp_process.start()  # 必须先启动工作进程，只有启动之后temp_process才有pid，否则为None
                 self.pid_set.add(temp_process.pid)
-                self.model_ctx_dict[task_name] = task_dict['model_ctx'][task_name]
 
                 self.resource_limit_dict[task_name] = dict()
                 # 使用cgroupspy限制进程使用的资源
