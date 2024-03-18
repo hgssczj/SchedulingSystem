@@ -219,9 +219,9 @@ class ServerManager(object):
     def __init__(self):
         # 云端系统配置相关
         self.server_ip = '114.212.81.11'  # 默认设置需要与服务器ip保持一致，供定时事件使用
-        self.server_port = 5500
+        self.server_port = 3500
         self.edge_ip_set = set()  # 存放所有边缘端的ip，用于向边缘端发送请求
-        self.edge_port = 5500  # 边缘端服务器的端口号，所有边缘端统一
+        self.edge_port = 3500  # 边缘端服务器的端口号，所有边缘端统一
         self.edge_get_task_url = "/task-register"  # 边缘端接受软件下装的接口
         self.server_codebase = os.path.join(os.path.abspath('.'), "")   # 为了导入工作进程代码，需要将代码下载到当前工作目录下
 
@@ -990,8 +990,8 @@ def get_cluster_info():
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--server_ip', dest='server_ip', type=str, default='127.0.0.1')
-    parser.add_argument('--server_port', dest='server_port', type=int, default=5500)
-    parser.add_argument('--edge_port', dest='edge_port', type=int, default=5500)
+    parser.add_argument('--server_port', dest='server_port', type=int, default=3500)
+    parser.add_argument('--edge_port', dest='edge_port', type=int, default=3500)
     args = parser.parse_args()
 
     server_manager.init_server_param(args.server_ip, args.server_port, args.edge_port)
@@ -1060,5 +1060,5 @@ if __name__ == '__main__':
     print(task_dict.keys())
     print(task_dict)
     server_manager.create_task_process(task_dict)
-
+    #测试
     app.run(host=server_manager.server_ip, port=server_manager.server_port)

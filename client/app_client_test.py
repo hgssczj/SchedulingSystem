@@ -217,9 +217,9 @@ class ClientManager(object):
     def __init__(self):
         # 边端系统参数相关
         self.server_ip = '114.212.81.11'  # 服务器服务端的ip和端口号
-        self.server_port = 5500
+        self.server_port = 3500
         self.edge_ip = '127.0.0.1'  # 默认设置为127.0.0.1，供定时事件使用
-        self.edge_port = 5500
+        self.edge_port = 3500
         self.register_path = "/register_edge"  # 向服务器注册边缘端的接口
         self.server_ssh_port = 22   # 服务端接受ssh连接的端口
         self.server_ssh_username = 'guest'  # 服务端ssh连接的用户名和密码
@@ -838,9 +838,9 @@ def get_client_status():
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--server_ip', dest='server_ip', type=str, default='114.212.81.11')
-    parser.add_argument('--server_port', dest='server_port', type=int, default=5500)
+    parser.add_argument('--server_port', dest='server_port', type=int, default=3500)
     parser.add_argument('--edge_ip', dest='edge_ip', type=str, default='192.168.100.5')
-    parser.add_argument('--edge_port', dest='edge_port', type=int, default=5500)
+    parser.add_argument('--edge_port', dest='edge_port', type=int, default=3500)
     args = parser.parse_args()
 
     client_manager.init_client_param(args.server_ip, args.server_port, args.edge_ip, args.edge_port)
