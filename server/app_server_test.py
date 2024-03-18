@@ -1024,8 +1024,8 @@ if __name__ == '__main__':
     server_manager.create_task_process(task_dict)
     #打开json文件，自动创建进程
     '''
-
-    json_data='\
+    '''
+    json_data=\
     {\
         "name": "face_pose_estimation",  \
         "flow": ["face_detection", "face_alignment"],\
@@ -1045,9 +1045,16 @@ if __name__ == '__main__':
             }\
         } \
     }\
+    '''
+    json_data='\
+    {\
+        "name": "gender_classify_job",  \
+        "flow": ["face_detection", "gender_classification"]\
+    }\
     '
+    
     server_manager.code_set.add("face_detection")
-    server_manager.code_set.add("face_alignment")
+    server_manager.code_set.add("gender_classification")
     task_dict=json.loads(json_data)
     print(type(task_dict))
     print(task_dict.keys())
