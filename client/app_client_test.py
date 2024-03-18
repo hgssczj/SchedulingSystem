@@ -907,7 +907,7 @@ if __name__ == '__main__':
     '
 
     client_manager.code_set.add("face_detection")
-    client_manager.code_set.add("face_alignment")
+    client_manager.code_set.add("gender_classification")
     task_dict=json.loads(json_data)
     print(type(task_dict))
     print(task_dict.keys())
