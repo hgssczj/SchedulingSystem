@@ -765,6 +765,11 @@ def execute_task(task_name):
             input_ctx['image'] = decode_image(input_ctx['image'])
             server_manager.input_queue_dict[task_name][0].put(input_ctx)  # 单进程串行执行所有任务
             output_ctx = server_manager.output_queue_dict[task_name][0].get()
+        elif task_name == 'gender_classification':
+            for i in range(len(input_ctx['faces'])):
+                input_ctx['faces'][i] = decode_image(input_ctx['faces'][i])
+            server_manager.input_queue_dict[task_name][0].put(input_ctx)  # 单进程串行执行所有任务
+            output_ctx = server_manager.output_queue_dict[task_name][0].get()
         assert isinstance(output_ctx['proc_resource_info'], dict)
         output_ctx['proc_resource_info']['cpu_util_limit'] = server_manager.get_task_cpu_util_limit(task_name)
         output_ctx['proc_resource_info']['mem_util_limit'] = server_manager.get_task_mem_util_limit(task_name)
