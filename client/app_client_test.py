@@ -217,9 +217,9 @@ class ClientManager(object):
     def __init__(self):
         # 边端系统参数相关
         self.server_ip = '114.212.81.11'  # 服务器服务端的ip和端口号
-        self.server_port = 5500
+        self.server_port = 4500
         self.edge_ip = '127.0.0.1'  # 默认设置为127.0.0.1，供定时事件使用
-        self.edge_port = 5500
+        self.edge_port = 4500
         self.register_path = "/register_edge"  # 向服务器注册边缘端的接口
         self.server_ssh_port = 22   # 服务端接受ssh连接的端口
         self.server_ssh_username = 'guest'  # 服务端ssh连接的用户名和密码
@@ -572,19 +572,19 @@ class ClientManager(object):
 
     # 维护边端状态相关
     def update_client_status(self):
-        self.client_status['device_state'] = dict()  # 记录设备层面的资源使用情况
-        self.client_status['device_state']['cpu_ratio'] = psutil.cpu_percent(interval=None, percpu=False)  # 所有cpu的使用率
-        self.client_status['device_state']['n_cpu'] = self.cpu_count
-        self.client_status['device_state']['mem_total'] = psutil.virtual_memory().total / 1024 / 1024 / 1024
-        self.client_status['device_state']['mem_ratio'] = psutil.virtual_memory().percent
+        device_state_dict = dict()  # 记录设备层面的资源使用情况
+        device_state_dict['cpu_ratio'] = psutil.cpu_percent(interval=None, percpu=False)  # 所有cpu的使用率
+        device_state_dict['n_cpu'] = self.cpu_count
+        device_state_dict['mem_total'] = psutil.virtual_memory().total / 1024 / 1024 / 1024
+        device_state_dict['mem_ratio'] = psutil.virtual_memory().percent
 
-        self.client_status['device_state']['swap_ratio'] = psutil.swap_memory().percent
+        device_state_dict['swap_ratio'] = psutil.swap_memory().percent
         # 发起请求时再对网络情况进行采样
         old_net_bytes = psutil.net_io_counters().bytes_sent + psutil.net_io_counters().bytes_recv
         sec_interval = 0.3
         time.sleep(sec_interval)
         new_net_bytes = psutil.net_io_counters().bytes_sent + psutil.net_io_counters().bytes_recv
-        self.client_status['device_state']['net_ratio(MBps)'] = round((new_net_bytes - old_net_bytes) / (1024.0 * 1024)
+        device_state_dict['net_ratio(MBps)'] = round((new_net_bytes - old_net_bytes) / (1024.0 * 1024)
                                                                 / sec_interval, 5)
 
         # 获取GPU使用情况
@@ -616,16 +616,20 @@ class ClientManager(object):
                 gpu_mem_utilization[str(i)] = memory_info.used / memory_info.total * 100  # GPU i的显存占用比例
                 gpu_compute_utilization[str(i)] = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu  # GPU i 计算能力的使用率，
             pynvml.nvmlShutdown()  # 最后关闭管理工具
-        self.client_status['device_state']['gpu_mem_utilization'] = gpu_mem_utilization
-        self.client_status['device_state']['gpu_compute_utilization'] = gpu_compute_utilization
-        self.client_status['device_state']['gpu_mem_total'] = gpu_mem_total
-
-        # 更新边缘端各类工作进程的信息
-        self.client_status['service_state'] = dict()
-        for task_name, resource_limit in self.resource_limit_dict.items():
-            self.client_status['service_state'][task_name] = resource_limit
+        device_state_dict['gpu_mem_utilization'] = gpu_mem_utilization
+        device_state_dict['gpu_compute_utilization'] = gpu_compute_utilization
+        device_state_dict['gpu_mem_total'] = gpu_mem_total
+        self.client_status['device_state'] = device_state_dict
         
-        return self.client_status
+        # 更新边缘端各类工作进程的信息
+        service_state_dict = dict()
+        for task_name, resource_limit in self.resource_limit_dict.items():
+            service_state_dict[task_name] = resource_limit
+        self.client_status['service_state'] = service_state_dict
+        
+        return {
+            'update_flag': True
+        }
 
     def get_client_status(self):
         return self.client_status
@@ -825,9 +829,8 @@ def limit_task_resource():
 @app.route("/update_client_status")
 def update_client_status():
     # 更新边缘端机器整体的资源信息
-    client_status = client_manager.update_client_status()
-    print("client status change:{}.".format(client_status))
-    return jsonify(client_status)
+    update_result = client_manager.update_client_status()
+    return jsonify(update_result)
 
 
 @app.route("/get_client_status")
@@ -838,9 +841,9 @@ def get_client_status():
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--server_ip', dest='server_ip', type=str, default='114.212.81.11')
-    parser.add_argument('--server_port', dest='server_port', type=int, default=5500)
+    parser.add_argument('--server_port', dest='server_port', type=int, default=4500)
     parser.add_argument('--edge_ip', dest='edge_ip', type=str, default='192.168.100.5')
-    parser.add_argument('--edge_port', dest='edge_port', type=int, default=5500)
+    parser.add_argument('--edge_port', dest='edge_port', type=int, default=4500)
     args = parser.parse_args()
 
     client_manager.init_client_param(args.server_ip, args.server_port, args.edge_ip, args.edge_port)

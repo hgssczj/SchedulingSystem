@@ -219,9 +219,9 @@ class ServerManager(object):
     def __init__(self):
         # 云端系统配置相关
         self.server_ip = '114.212.81.11'  # 默认设置需要与服务器ip保持一致，供定时事件使用
-        self.server_port = 5500
+        self.server_port = 4500
         self.edge_ip_set = set()  # 存放所有边缘端的ip，用于向边缘端发送请求
-        self.edge_port = 5500  # 边缘端服务器的端口号，所有边缘端统一
+        self.edge_port = 4500  # 边缘端服务器的端口号，所有边缘端统一
         self.edge_get_task_url = "/task-register"  # 边缘端接受软件下装的接口
         self.server_codebase = os.path.join(os.path.abspath('.'), "")   # 为了导入工作进程代码，需要将代码下载到当前工作目录下
 
@@ -517,19 +517,19 @@ class ServerManager(object):
         return service_list
 
     def update_server_status(self):
-        self.server_status['device_state'] = dict()  # 记录设备层面的资源使用情况
-        self.server_status['device_state']['cpu_ratio'] = psutil.cpu_percent(interval=None, percpu=False)  # 所有cpu的使用率
-        self.server_status['device_state']['n_cpu'] = self.cpu_count
-        self.server_status['device_state']['mem_total'] = psutil.virtual_memory().total / 1024 / 1024 / 1024
-        self.server_status['device_state']['mem_ratio'] = psutil.virtual_memory().percent
+        device_state_dict = dict()  # 记录设备层面的资源使用情况
+        device_state_dict['cpu_ratio'] = psutil.cpu_percent(interval=None, percpu=False)  # 所有cpu的使用率
+        device_state_dict['n_cpu'] = self.cpu_count
+        device_state_dict['mem_total'] = psutil.virtual_memory().total / 1024 / 1024 / 1024
+        device_state_dict['mem_ratio'] = psutil.virtual_memory().percent
 
-        self.server_status['device_state']['swap_ratio'] = psutil.swap_memory().percent
+        device_state_dict['swap_ratio'] = psutil.swap_memory().percent
         # 发起请求时再对网络情况进行采样
         old_net_bytes = psutil.net_io_counters().bytes_sent + psutil.net_io_counters().bytes_recv
         sec_interval = 0.3
         time.sleep(sec_interval)
         new_net_bytes = psutil.net_io_counters().bytes_sent + psutil.net_io_counters().bytes_recv
-        self.server_status['device_state']['net_ratio(MBps)'] = round((new_net_bytes - old_net_bytes) / (1024.0 * 1024)
+        device_state_dict['net_ratio(MBps)'] = round((new_net_bytes - old_net_bytes) / (1024.0 * 1024)
                                                                 / sec_interval, 5)
 
         # 获取GPU使用情况
@@ -561,16 +561,20 @@ class ServerManager(object):
                 gpu_compute_utilization[str(i)] = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu  # GPU i 计算能力的使用率，百分比
                 gpu_mem_total[str(i)] = memory_info.total / 1024 / 1024 / 1024
             pynvml.nvmlShutdown()  # 最后关闭管理工具
-        self.server_status['device_state']['gpu_mem_utilization'] = gpu_mem_utilization
-        self.server_status['device_state']['gpu_compute_utilization'] = gpu_compute_utilization
-        self.server_status['device_state']['gpu_mem_total'] = gpu_mem_total
+        device_state_dict['gpu_mem_utilization'] = gpu_mem_utilization
+        device_state_dict['gpu_compute_utilization'] = gpu_compute_utilization
+        device_state_dict['gpu_mem_total'] = gpu_mem_total
+        self.server_status['device_state'] = device_state_dict
 
         # 更新云端各类工作进程的信息
-        self.server_status['service_state'] = dict()
+        service_state_dict = dict()
         for task_name, resource_limit in self.resource_limit_dict.items():
-            self.server_status['service_state'][task_name] = resource_limit
+            service_state_dict[task_name] = resource_limit
+        self.server_status['service_state'] = service_state_dict
         
-        return self.server_status
+        return {
+            'update_flag': True
+        }
 
     def get_server_status(self):
         return self.server_status
@@ -578,11 +582,13 @@ class ServerManager(object):
     def update_clients_status(self):
         for edge_ip in self.edge_ip_set:
             edge_url = edge_ip + ":" + str(self.edge_port)  # "114.212.81.11:5501"
-            temp_url = "http://" + edge_url + "/update_client_status"
+            temp_url = "http://" + edge_url + "/get_client_status"
             temp_res = requests.get(temp_url).content.decode()
             temp_res_dict = json.loads(temp_res)
             self.clients_status[edge_ip] = temp_res_dict
-        return self.clients_status
+        return {
+            'update_flag': True
+        }
 
     def get_clients_status(self):
         return self.clients_status
@@ -954,16 +960,15 @@ def get_execute_url(task_name):
 @app.route("/update_server_status")
 def update_server_status():
     # 更新云端机器整体的资源信息
-    server_status = server_manager.update_server_status()
-    print("server status change:{}.".format(server_status))
-    return jsonify(server_status)
+    update_result = server_manager.update_server_status()
+    return jsonify(update_result)
 
 
 @app.route("/update_clients_status")
 def update_clients_status():
     # 获取所有边缘端的状态信息
-    clients_status = server_manager.update_clients_status()
-    return jsonify(clients_status)
+    update_result = server_manager.update_clients_status()
+    return jsonify(update_result)
 
 
 @app.route("/get_system_status")
@@ -990,8 +995,8 @@ def get_cluster_info():
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--server_ip', dest='server_ip', type=str, default='127.0.0.1')
-    parser.add_argument('--server_port', dest='server_port', type=int, default=5500)
-    parser.add_argument('--edge_port', dest='edge_port', type=int, default=5500)
+    parser.add_argument('--server_port', dest='server_port', type=int, default=4500)
+    parser.add_argument('--edge_port', dest='edge_port', type=int, default=4500)
     args = parser.parse_args()
 
     server_manager.init_server_param(args.server_ip, args.server_port, args.edge_port)
