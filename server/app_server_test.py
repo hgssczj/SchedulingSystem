@@ -1065,5 +1065,5 @@ if __name__ == '__main__':
     print(task_dict.keys())
     print(task_dict)
     server_manager.create_task_process(task_dict)
-
+    #测试
     app.run(host=server_manager.server_ip, port=server_manager.server_port)
