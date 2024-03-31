@@ -2,6 +2,7 @@ import platform
 import requests
 from flask import Flask, make_response, request, render_template, jsonify, send_from_directory
 import json
+import flask
 import zipfile
 import os
 import multiprocessing as mp
@@ -208,12 +209,6 @@ def trigger_update_server_status():
     print("trigger_update_server_status!")
 
 
-def trigger_update_clients_status():
-    # 定时触发获取所有边缘节点状态，心跳机制
-    temp_url = "http://" + server_manager.server_ip + ":" + str(server_manager.server_port) + "/update_clients_status"
-    requests.get(temp_url)
-    print("trigger_get_clients_status!")
-
 
 class ServerManager(object):
     def __init__(self):
@@ -222,9 +217,8 @@ class ServerManager(object):
         self.server_port = 4500
         self.edge_ip_set = set()  # 存放所有边缘端的ip，用于向边缘端发送请求
         self.edge_port = 4500  # 边缘端服务器的端口号，所有边缘端统一
-        self.edge_get_task_url = "/task-register"  # 边缘端接受软件下装的接口
         self.server_codebase = os.path.join(os.path.abspath('.'), "")   # 为了导入工作进程代码，需要将代码下载到当前工作目录下
-
+        self.task_dict_list = []  # 云端存放用户提交服务的task_dict，用于提供给边缘端进行软件下装
         # 系统状态相关
         self.server_status = dict()  # 记录server的状态，资源状态、各任务进程状态
         self.clients_status = dict()  # 记录各个边缘端的状态
@@ -579,19 +573,20 @@ class ServerManager(object):
     def get_server_status(self):
         return self.server_status
 
-    def update_clients_status(self):
-        for edge_ip in self.edge_ip_set:
-            edge_url = edge_ip + ":" + str(self.edge_port)  # "114.212.81.11:5501"
-            temp_url = "http://" + edge_url + "/get_client_status"
-            temp_res = requests.get(temp_url).content.decode()
-            temp_res_dict = json.loads(temp_res)
-            self.clients_status[edge_ip] = temp_res_dict
+    
+    
+    def update_client_status(self, edge_ip, edge_status):
+        assert edge_ip in self.edge_ip_set
+        self.clients_status[edge_ip] = edge_status
+        print(self.clients_status)
         return {
             'update_flag': True
         }
 
+
     def get_clients_status(self):
         return self.clients_status
+
 
     def get_system_status(self):
         system_status_dict = dict()
@@ -602,6 +597,8 @@ class ServerManager(object):
         for edge_ip in self.clients_status.keys():
             system_status_dict['host'][edge_ip] = self.clients_status[edge_ip]
         return system_status_dict
+
+
 
     def get_cluster_info(self):
         cluster_info = dict()
@@ -656,12 +653,6 @@ class ServerAppConfig(object):
         {
             'id': 'job1',
             'func': 'app_server_test:trigger_update_server_status',
-            'trigger': 'interval',  # 间隔触发
-            'seconds': 3,  # 定时器时间间隔
-        },
-        {
-            'id': 'job2',
-            'func': 'app_server_test:trigger_update_clients_status',
             'trigger': 'interval',  # 间隔触发
             'seconds': 3,  # 定时器时间间隔
         }
@@ -719,11 +710,7 @@ def upload_json_and_codefiles_api():
                     zip_ref.extractall(server_manager.server_codebase + file)
             task_dict['task_code_path'][file] = server_manager.server_codebase + file
 
-        # 向边缘端发送应用相关信息
-        headers = {"Content-type": "application/json"}
-        for edge_ip in server_manager.edge_ip_set:
-            edge_url = "http://" + edge_ip + ":" + str(server_manager.edge_port) + server_manager.edge_get_task_url
-            res1 = requests.post(edge_url, data=json.dumps(task_dict), headers=headers)
+        server_manager.task_dict_list.append(task_dict)
 
         # 代码下装时，创建云端工作进程（为DAG图中每一个子任务都创建一个工作进程）
         server_manager.create_task_process(task_dict)
@@ -743,9 +730,9 @@ def upload_json_and_codefiles_api():
         return res
 
 
-@app.route("/register_edge")
+@app.route("/register_edge", methods=['POST'])
 def register_edge():
-    edge_ip = request.remote_addr
+    edge_ip = flask.request.json["device_ip"]
     server_manager.add_edge_ip(edge_ip)
     return jsonify(edge_ip)
 
@@ -964,10 +951,17 @@ def update_server_status():
     return jsonify(update_result)
 
 
-@app.route("/update_clients_status")
-def update_clients_status():
-    # 获取所有边缘端的状态信息
-    update_result = server_manager.update_clients_status()
+@app.route("/get_server_service_info")
+def get_server_service_info():
+    # 返回云端当前所部署服务的信息，包括服务文件位置等，用于边缘端进行软件下装
+    task_info_list = server_manager.task_dict_list
+    return jsonify({'service_info_list': task_info_list})
+
+
+@app.route("/update_client_status", methods=["POST"])
+def update_client_status():
+    para = flask.request.json
+    update_result = server_manager.update_client_status(edge_ip=para['device_ip'], edge_status = para['device_status'])
     return jsonify(update_result)
 
 
@@ -1009,48 +1003,6 @@ if __name__ == '__main__':
     #自动启动服务进程，无需接收用户上传提交代码文件。需要读取json并使用。SchedulingSyetem目录之下已经有响应模型，不需要再接收下装了。
     #打开json文件，自动创建进程
     import json
-    '''  #不再运行车俩检测进程
-    json_data=' \
-    { \
-        "name": "car_detection",  \
-        "flow": ["car_detection"],\
-        "model_ctx": {  \
-            "car_detection": {\
-                "weights": "yolov5s.pt",\
-                "device": "cuda:0"\
-            }\
-        }  \
-    }\
-    '
-    task_dict=json.loads(json_data)
-    print(type(task_dict))
-    print(task_dict.keys())
-    print(task_dict)
-    server_manager.create_task_process(task_dict)
-    #打开json文件，自动创建进程
-    '''
-    '''
-    json_data=\
-    {\
-        "name": "face_pose_estimation",  \
-        "flow": ["face_detection", "face_alignment"],\
-        "model_ctx": {  \
-            "face_detection": {\
-                "net_type": "mb_tiny_RFB_fd",\
-                "input_size": 480,\
-                "threshold": 0.7,\
-                "candidate_size": 1500,\
-                "device": "cuda:0"\
-            },\
-            "face_alignment": {\
-                "lite_version": 1,\
-                "model_path": "models/hopenet_lite_6MB.pkl",\
-                "batch_size": 1,\
-                "device": "cuda:0"\
-            }\
-        } \
-    }\
-    '''
     json_data='\
     {\
         "name": "gender_classify_job",  \

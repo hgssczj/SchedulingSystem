@@ -63,7 +63,7 @@ python3 app_server.py --server_ip=114.212.81.11 --server_port=5500 --edge_port=5
 # --server_ip指定云端提供服务的ip, --server_port指定云端提供服务的port
 # --edge_ip指定边端提供服务的ip,设置为0.0.0.0以便同时提供定时事件和计算服务
 # --edge_port指定边端提供服务的port
-python3 app_client.py --server_ip=114.212.81.11 --server_port=5500 --edge_ip=0.0.0.0 --edge_port=5500
+python3 app_client.py --server_ip=114.212.81.11 --server_port=5500 --edge_ip=172.27.132.253 --edge_port=5500
 ```
 * 如果使用了cgroupspy控制进程资源，则在程序执行结束之后需要执行以下脚本，删除对应的进程控制文件夹：
 ```shell

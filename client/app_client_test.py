@@ -18,17 +18,31 @@ import argparse
 
 def register_edge_to_server():
     # 主动向服务器发送get请求，实现服务器记录各个边缘节点ip
-    url = "http://" + client_manager.server_ip + ":" + str(client_manager.server_port) + client_manager.register_path
-    res = requests.get(url)
+    sess = requests.Session()
+    r = sess.post(url="http://{}:{}/register_edge".format(client_manager.server_ip, client_manager.server_port),
+                  json={"device_ip": client_manager.edge_ip})
+    sess.close()
     print("Edge register success!")
 
 
 def trigger_update_client_status():
     # 定时触发更新client状态
-    temp_url = "http://" + client_manager.edge_ip + ":" + str(client_manager.edge_port) + "/update_client_status"
+    temp_url = "http://" + client_manager.timing_edge_ip + ":" + str(client_manager.edge_port) + "/update_client_status"
     requests.get(temp_url)
     print("trigger_update_client_status!")
 
+
+def trigger_get_server_service_info():
+    # 定时触发从云端获取下装服务的信息
+    temp_url = "http://" + client_manager.server_ip + ":" + str(client_manager.server_port) + "/get_server_service_info"
+    service_info = requests.get(temp_url).json()
+    
+    for task_dict in service_info['service_info_list']:
+        # 下载应用相关代码
+        client_manager.download_task_code(task_dict)
+
+        # 创建执行应用中各个任务的进程
+        client_manager.create_task_process(task_dict)
 '''
 def monitor_gpu(lock, pid_gpu_dict):
     # 监听各个工作进程在执行任务过程中对GPU计算能力的利用率
@@ -218,7 +232,8 @@ class ClientManager(object):
         # 边端系统参数相关
         self.server_ip = '114.212.81.11'  # 服务器服务端的ip和端口号
         self.server_port = 4500
-        self.edge_ip = '127.0.0.1'  # 默认设置为127.0.0.1，供定时事件使用
+        self.timing_edge_ip = '127.0.0.1'  # 默认设置为127.0.0.1，供定时事件使用
+        self.edge_ip = '172.27.132.105'
         self.edge_port = 4500
         self.register_path = "/register_edge"  # 向服务器注册边缘端的接口
         self.server_ssh_port = 22   # 服务端接受ssh连接的端口
@@ -643,6 +658,12 @@ class ClientAppConfig(object):
             'func': 'app_client_test:trigger_update_client_status',
             'trigger': 'interval',  # 间隔触发
             'seconds': 3,  # 定时器时间间隔
+        },
+        {
+            'id': 'job2',
+            'func': 'app_client_test:trigger_get_server_service_info',
+            'trigger': 'interval',  # 间隔触发
+            'seconds': 5,  # 定时器时间间隔
         }
     ]
     SCHEDULER_API_ENABLED = True
@@ -830,6 +851,14 @@ def limit_task_resource():
 def update_client_status():
     # 更新边缘端机器整体的资源信息
     update_result = client_manager.update_client_status()
+    
+    # 向云端发起post请求，更新云端的边缘设备信息
+    client_status = client_manager.get_client_status()
+    sess = requests.Session()
+    r = sess.post(url="http://{}:{}/update_client_status".format(client_manager.server_ip, client_manager.server_port),
+                  json={"device_status": client_status,
+                        "device_ip": client_manager.edge_ip})
+    sess.close()
     return jsonify(update_result)
 
 
@@ -842,7 +871,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--server_ip', dest='server_ip', type=str, default='114.212.81.11')
     parser.add_argument('--server_port', dest='server_port', type=int, default=4500)
-    parser.add_argument('--edge_ip', dest='edge_ip', type=str, default='192.168.100.5')
+    parser.add_argument('--edge_ip', dest='edge_ip', type=str, default='172.27.132.105')
     parser.add_argument('--edge_port', dest='edge_port', type=int, default=4500)
     args = parser.parse_args()
 
@@ -859,49 +888,6 @@ if __name__ == '__main__':
     #打开json文件，自动创建进程
     
     import json
-    ''' #不再运行车俩检测进程
-    json_data=' \
-    { \
-        "name": "car_detection",  \
-        "flow": ["car_detection"],\
-        "model_ctx": {  \
-            "car_detection": {\
-                "weights": "yolov5s.pt",\
-                "device": "cuda:0"\
-            }\
-        }  \
-    }\
-    '
-    task_dict=json.loads(json_data)
-    print(type(task_dict))
-    print(task_dict.keys())
-    print(task_dict)
-    client_manager.create_task_process(task_dict)
-    #打开json文件，自动创建进程
-    '''
-    '''
-    json_data='\
-    {\
-        "name": "face_pose_estimation",  \
-        "flow": ["face_detection", "face_alignment"],\
-        "model_ctx": {  \
-            "face_detection": {\
-                "net_type": "mb_tiny_RFB_fd",\
-                "input_size": 480,\
-                "threshold": 0.7,\
-                "candidate_size": 1500,\
-                "device": "cuda:0"\
-            },\
-            "face_alignment": {\
-                "lite_version": 1,\
-                "model_path": "models/hopenet_lite_6MB.pkl",\
-                "batch_size": 1,\
-                "device": "cuda:0"\
-            }\
-        } \
-    }\
-    '
-    '''
     json_data='\
     {\
         "name": "gender_classify_job",  \
@@ -917,4 +903,4 @@ if __name__ == '__main__':
     print(task_dict)
     client_manager.create_task_process(task_dict)
 
-    app.run(host=client_manager.edge_ip, port=client_manager.edge_port)
+    app.run(host='0.0.0.0', port=client_manager.edge_port)
