@@ -15,34 +15,6 @@ import psutil
 from field_codec_utils import decode_image, encode_image
 import argparse
 
-
-def register_edge_to_server():
-    # 主动向服务器发送get请求，实现服务器记录各个边缘节点ip
-    sess = requests.Session()
-    r = sess.post(url="http://{}:{}/register_edge".format(client_manager.server_ip, client_manager.server_port),
-                  json={"device_ip": client_manager.edge_ip})
-    sess.close()
-    print("Edge register success!")
-
-
-def trigger_update_client_status():
-    # 定时触发更新client状态
-    temp_url = "http://" + client_manager.timing_edge_ip + ":" + str(client_manager.edge_port) + "/update_client_status"
-    requests.get(temp_url)
-    print("trigger_update_client_status!")
-
-
-def trigger_get_server_service_info():
-    # 定时触发从云端获取下装服务的信息
-    temp_url = "http://" + client_manager.server_ip + ":" + str(client_manager.server_port) + "/get_server_service_info"
-    service_info = requests.get(temp_url).json()
-    
-    for task_dict in service_info['service_info_list']:
-        # 下载应用相关代码
-        client_manager.download_task_code(task_dict)
-
-        # 创建执行应用中各个任务的进程
-        client_manager.create_task_process(task_dict)
 '''
 def monitor_gpu(lock, pid_gpu_dict):
     # 监听各个工作进程在执行任务过程中对GPU计算能力的利用率
@@ -231,10 +203,10 @@ class ClientManager(object):
     def __init__(self):
         # 边端系统参数相关
         self.server_ip = '114.212.81.11'  # 服务器服务端的ip和端口号
-        self.server_port = 4500
+        self.server_port = 4520
         self.timing_edge_ip = '127.0.0.1'  # 默认设置为127.0.0.1，供定时事件使用
-        self.edge_ip = '192.168.1.9'
-        self.edge_port = 4500
+        self.edge_ip = '192.168.1.7'
+        self.edge_port = 4520
         self.register_path = "/register_edge"  # 向服务器注册边缘端的接口
         self.server_ssh_port = 22   # 服务端接受ssh连接的端口
         self.server_ssh_username = 'guest'  # 服务端ssh连接的用户名和密码
@@ -650,24 +622,6 @@ class ClientManager(object):
         return self.client_status
 
 
-class ClientAppConfig(object):
-    # flask定时任务的配置类
-    JOBS = [
-        {
-            'id': 'job1',
-            'func': 'app_client_test:trigger_update_client_status',
-            'trigger': 'interval',  # 间隔触发
-            'seconds': 3,  # 定时器时间间隔
-        },
-        {
-            'id': 'job2',
-            'func': 'app_client_test:trigger_get_server_service_info',
-            'trigger': 'interval',  # 间隔触发
-            'seconds': 5,  # 定时器时间间隔
-        }
-    ]
-    SCHEDULER_API_ENABLED = True
-
 
 WSGIRequestHandler.protocol_version = "HTTP/1.1"
 app = Flask(__name__)
@@ -870,19 +824,13 @@ def get_client_status():
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--server_ip', dest='server_ip', type=str, default='114.212.81.11')
-    parser.add_argument('--server_port', dest='server_port', type=int, default=4500)
-    parser.add_argument('--edge_ip', dest='edge_ip', type=str, default='192.168.1.9')
-    parser.add_argument('--edge_port', dest='edge_port', type=int, default=4500)
+    parser.add_argument('--server_port', dest='server_port', type=int, default=4520)
+    parser.add_argument('--edge_ip', dest='edge_ip', type=str, default='192.168.1.7')  # 在一台空闲的边缘设备上运行
+    parser.add_argument('--edge_port', dest='edge_port', type=int, default=4520)
     args = parser.parse_args()
 
     client_manager.init_client_param(args.server_ip, args.server_port, args.edge_ip, args.edge_port)
 
-    register_edge_to_server()  # 向云端注册自己的存在
-
-    app.config.from_object(ClientAppConfig())
-    scheduler = APScheduler()  # 利用APScheduler启动定时任务
-    scheduler.init_app(app)
-    scheduler.start()
 
     #自动启动服务进程，无需接收用户上传提交代码文件。需要读取json并使用。SchedulingSyetem目录之下已经有响应模型，不需要再接收下装了。
     #打开json文件，自动创建进程

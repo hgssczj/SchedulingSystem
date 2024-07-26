@@ -1,96 +1,19 @@
 import platform
-import time
-from flask_apscheduler import APScheduler
-from flask_cors import CORS
-from flask import Flask, make_response, request, jsonify
 import requests
+from flask import Flask, make_response, request, render_template, jsonify, send_from_directory
+import json
+import flask
+import zipfile
 import os
-import paramiko
-import stat
-import importlib
-import sys
 import multiprocessing as mp
+import sys
+import importlib
 from werkzeug.serving import WSGIRequestHandler
-import psutil
+from flask_apscheduler import APScheduler
 from field_codec_utils import decode_image, encode_image
+import psutil
+import time
 import argparse
-
-
-def register_edge_to_server():
-    # 主动向服务器发送get请求，实现服务器记录各个边缘节点ip
-    sess = requests.Session()
-    r = sess.post(url="http://{}:{}/register_edge".format(client_manager.server_ip, client_manager.server_port),
-                  json={"device_ip": client_manager.edge_ip})
-    sess.close()
-    print("Edge register success!")
-
-
-def trigger_update_client_status():
-    # 定时触发更新client状态
-    temp_url = "http://" + client_manager.timing_edge_ip + ":" + str(client_manager.edge_port) + "/update_client_status"
-    requests.get(temp_url)
-    print("trigger_update_client_status!")
-
-
-def trigger_get_server_service_info():
-    # 定时触发从云端获取下装服务的信息
-    temp_url = "http://" + client_manager.server_ip + ":" + str(client_manager.server_port) + "/get_server_service_info"
-    service_info = requests.get(temp_url).json()
-    
-    for task_dict in service_info['service_info_list']:
-        # 下载应用相关代码
-        client_manager.download_task_code(task_dict)
-
-        # 创建执行应用中各个任务的进程
-        client_manager.create_task_process(task_dict)
-'''
-def monitor_gpu(lock, pid_gpu_dict):
-    # 监听各个工作进程在执行任务过程中对GPU计算能力的利用率
-    if torch.cuda.is_available():
-        if platform.uname().machine[0:5] == 'aarch':  # nano、tx2
-            from jtop import jtop
-            gpu_total_mem = 3.9 * 1024 * 1024  # nano显存总量为3.9G，未找到获取显存总量的api，直接写死，单位kB
-            with jtop(0.05) as jetson:
-                while jetson.ok():
-                    res_dict = dict()
-                    for pro in jetson.processes:
-                        temp_pid = pro[0]
-                        temp_dict = dict()
-                        temp_dict['memoryUtilization'] = pro[-2] / gpu_total_mem * 100
-                        res_dict[temp_pid] = temp_dict
-                    lock.acquire()
-                    for key in res_dict:
-                        pid_gpu_dict[key] = res_dict[key]
-                    lock.release()
-        else:
-            import pynvml
-            pynvml.nvmlInit()
-            gpu_device_count = pynvml.nvmlDeviceGetCount()
-            while True:  # 开始监听
-                res_dict = dict()
-                for i in range(gpu_device_count):  # 遍历所有显卡设备
-                    handle = pynvml.nvmlDeviceGetHandleByIndex(i)
-                    pid_all_info = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
-                    for pidInfo in pid_all_info:  # 遍历所有在显卡上正在运行的进程
-                        try:
-                            account_stats = pynvml.nvmlDeviceGetAccountingStats(handle, pidInfo.pid)
-                        except pynvml.NVMLError:  # NVMLError_NotFound
-                            pass
-                        try:
-                            account_stats = pynvml.nvmlDeviceGetAccountingStats(handle, pidInfo.pid)
-                            temp_dict = dict()
-                            temp_dict['gpuUtilization'] = account_stats.gpuUtilization
-                            temp_dict['memoryUtilization'] = account_stats.memoryUtilization
-                            temp_dict['maxMemoryUsage'] = account_stats.maxMemoryUsage
-                            res_dict[pidInfo.pid] = temp_dict
-                        except pynvml.NVMLError:  # NVMLError_NotFound
-                            pass
-                lock.acquire()
-                for key in res_dict:
-                    pid_gpu_dict[key] = res_dict[key]
-                lock.release()
-            pynvml.nvmlShutdown()
-'''
 
 
 def work_func(task_name, q_input, q_output, model_ctx=None):
@@ -175,6 +98,7 @@ def work_func(task_name, q_input, q_output, model_ctx=None):
         end_cpu_per = p.cpu_percent(interval=None)  # 任务执行后进程的cpu占用率
         # end_cpu_time = p.cpu_times()  # 任务执行后进程的cpu_time
 
+
         # 内存消耗的计算
         # end_memory = p.memory_full_info().uss  # 任务执行之后进程占用的内存值，每次执行任务之后都重新计算
         # after_data_memory = p.memory_info().data
@@ -200,6 +124,7 @@ def work_func(task_name, q_input, q_output, model_ctx=None):
                 output_ctx['gpu_mem_use_2'] = new_gpu_memory / 1024
         '''
 
+
         '''
         output_ctx['cpu_all_time'] = (end_cpu_time.user - start_cpu_time.user) + \
                                      (end_cpu_time.system - start_cpu_time.system)  # 任务执行的cpu占用时间，包括用户态+内核态
@@ -219,7 +144,7 @@ def work_func(task_name, q_input, q_output, model_ctx=None):
         proc_resource_info = dict()  # 执行任务过程中的资源消耗情况
         proc_resource_info['pid'] = pid
         # 任务执行的cpu占用率，各个核上占用率之和的百分比->平均每个核的占用率，范围[0,1]
-        proc_resource_info['cpu_util_use'] = (end_cpu_per - start_cpu_per) / 100 / psutil.cpu_count()
+        proc_resource_info['cpu_util_use'] = end_cpu_per / 100 / psutil.cpu_count()
         proc_resource_info['mem_util_use'] = p.memory_percent(memtype='uss') / 100
         proc_resource_info['compute_latency'] = end_time - start_time  # 任务执行的延时，单位：秒(s)
 
@@ -227,30 +152,80 @@ def work_func(task_name, q_input, q_output, model_ctx=None):
         q_output.put(output_ctx)
 
 
-class ClientManager(object):
+'''
+def monitor_gpu(lock, pid_gpu_dict):
+    # 监听各个工作进程在执行任务过程中对GPU计算能力的利用率
+    if torch.cuda.is_available():
+        if platform.uname().machine[0:5] == 'aarch':  # nano、tx2
+            from jtop import jtop
+            gpu_total_mem = 3.9 * 1024 * 1024  # nano显存总量为3.9G，未找到获取显存总量的api，直接写死，单位kB
+            with jtop(0.05) as jetson:
+                while jetson.ok():
+                    res_dict = dict()
+                    for pro in jetson.processes:
+                        temp_pid = pro[0]
+                        temp_dict = dict()
+                        temp_dict['memoryUtilization'] = pro[-2] / gpu_total_mem * 100  # 百分比
+                        res_dict[temp_pid] = temp_dict
+                    lock.acquire()
+                    for key in res_dict:
+                        pid_gpu_dict[key] = res_dict[key]
+                    lock.release()
+        else:
+            import pynvml
+            pynvml.nvmlInit()
+            gpu_device_count = pynvml.nvmlDeviceGetCount()
+            while True:  # 开始监听
+                res_dict = dict()
+                for i in range(gpu_device_count):  # 遍历所有显卡设备
+                    handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+                    pid_all_info = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
+                    for pidInfo in pid_all_info:  # 遍历所有在显卡上正在运行的进程
+                        try:
+                            account_stats = pynvml.nvmlDeviceGetAccountingStats(handle, pidInfo.pid)
+                        except pynvml.NVMLError:  # NVMLError_NotFound
+                            pass
+                        try:
+                            account_stats = pynvml.nvmlDeviceGetAccountingStats(handle, pidInfo.pid)
+                            temp_dict = dict()
+                            temp_dict['gpuUtilization'] = account_stats.gpuUtilization
+                            temp_dict['memoryUtilization'] = account_stats.memoryUtilization
+                            temp_dict['maxMemoryUsage'] = account_stats.maxMemoryUsage
+                            res_dict[pidInfo.pid] = temp_dict
+                        except pynvml.NVMLError:  # NVMLError_NotFound
+                            pass
+                lock.acquire()
+                for key in res_dict:
+                    pid_gpu_dict[key] = res_dict[key]
+                lock.release()
+            pynvml.nvmlShutdown()
+'''
+
+
+
+class ServerManager(object):
     def __init__(self):
-        # 边端系统参数相关
-        self.server_ip = '114.212.81.11'  # 服务器服务端的ip和端口号
-        self.server_port = 4500
-        self.timing_edge_ip = '127.0.0.1'  # 默认设置为127.0.0.1，供定时事件使用
-        self.edge_ip = '192.168.1.9'
-        self.edge_port = 4500
-        self.register_path = "/register_edge"  # 向服务器注册边缘端的接口
-        self.server_ssh_port = 22   # 服务端接受ssh连接的端口
-        self.server_ssh_username = 'guest'  # 服务端ssh连接的用户名和密码
-        self.server_ssh_password = 'Dislabaiot@532_gu'
-        self.code_local_dir = os.path.abspath('.')  # 为了导入工作进程代码，需要将代码下载到当前工作目录下
+        # 云端系统配置相关
+        self.server_ip = '114.212.81.11'  # 默认设置需要与服务器ip保持一致，供定时事件使用
+        self.server_port = 4520
+        self.edge_ip_set = set()  # 存放所有边缘端的ip，用于向边缘端发送请求
+        self.edge_port = 4520  # 边缘端服务器的端口号，所有边缘端统一
+        self.server_codebase = os.path.join(os.path.abspath('.'), "")   # 为了导入工作进程代码，需要将代码下载到当前工作目录下
+        self.task_dict_list = []  # 云端存放用户提交服务的task_dict，用于提供给边缘端进行软件下装
+        # 系统状态相关
+        self.server_status = dict()  # 记录server的状态，资源状态、各任务进程状态
+        self.clients_status = dict()  # 记录各个边缘端的状态
 
         # 工作进程执行相关
-        self.code_set = set()  # 边缘端已存储的代码对应的应用的名字
-        self.process_dict = dict()   # 存放每个任务对应的工作进程，value为进程列表，方便动态增加各个任务工作进程数量
+        self.process_dict = dict()  # 存放每个任务对应的工作进程，key为任务名，value为进程列表，方便动态增加各个任务工作进程数量
         self.pid_set = set()  # 存放所有工作进程的pid
-        self.input_queue_dict = dict()   # 存放每个工作进程所需的输入输出队列，value为队列列表
+        self.code_set = set()  # 云端已存储的代码对应的应用的名字
+        self.input_queue_dict = dict()  # 存放每个工作进程所需的输入输出队列，value为队列列表
         self.output_queue_dict = dict()
         self.model_ctx_dict = dict()  # 存放每一类任务工作进程的模型参数，key为任务名，value为model_ctx
-
-        # 工作进程控制相关
         self.work_process_num = 0  # 当前节点上的工作进程数
+
+        # 工作进程资源控制相关
         self.cpu_count = psutil.cpu_count()  # 当前节点上的cpu核数
         self.process_mem_group_dict = dict()  # 记录各个进程对应的memory cgroup组，key为pid(int), value为group对象
         self.process_cpu_group_dict = dict()  # 记录各个进程对应的cpu cgroup组，key为pid(int), value为group对象
@@ -260,70 +235,13 @@ class ClientManager(object):
             'mem_util_limit': 1.0
         }
         self.resource_limit_dict = dict()  # 记录各类任务各类资源的使用上限，用于在创建新进程时使用，key为任务名，value为dict
+        self.dag_workflows = []  # 记录所有的DAG套餐
 
-        # 边端状态相关
-        self.client_status = dict()  # 记录server的状态，资源状态、各任务进程状态
-
-    def init_client_param(self, server_ip, server_port, edge_ip, edge_port):
+    # 云端设置相关
+    def init_server_param(self, server_ip, server_port, edge_port):
         self.server_ip = server_ip
         self.server_port = server_port
-        self.edge_ip = edge_ip
         self.edge_port = edge_port
-
-    # 软件下装相关
-    def get_all_files_in_remote_dir(self, sftp1, remote_dir):
-        all_files = list()
-        if remote_dir[-1] == '/':
-            remote_dir = remote_dir[0:-1]
-        files = sftp1.listdir_attr(remote_dir)
-        for file in files:
-            filename = remote_dir + '/' + file.filename
-            if stat.S_ISDIR(file.st_mode):  # 如果是文件夹的话递归处理
-                all_files.extend(self.get_all_files_in_remote_dir(sftp1, filename))
-            else:
-                all_files.append(filename)
-        return all_files
-
-        # 远程服务器上指定文件夹下载到本地文件夹
-
-    def sftp_get_dir(self, sftp1, remote_dir, local_dir):
-        try:
-            all_files = self.get_all_files_in_remote_dir(sftp1, remote_dir)
-            for file in all_files:
-                local_filename = file.replace(remote_dir, local_dir)
-                local_filepath = os.path.dirname(local_filename)
-                if not os.path.exists(local_filepath):
-                    os.makedirs(local_filepath)
-                sftp1.get(file, local_filename)
-        except:
-            print('ssh get dir from master failed.')
-
-    def download_task_code(self, task_dict):
-        if task_dict['name'] not in self.code_set:   # 当前应用未在边缘端提交过才下载代码文件
-            self.code_set.add(task_dict['name'])
-            remote_task_code_path = task_dict['task_code_path']
-            local_task_code_path = {}
-            print(remote_task_code_path)
-
-            ssh = paramiko.SSHClient()
-            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            ssh.connect(self.server_ip, self.server_ssh_port, self.server_ssh_username, self.server_ssh_password)
-            sftp = ssh.open_sftp()
-            for task_name in remote_task_code_path.keys():
-                self.code_set.add(task_name)
-                task_remote_dir = remote_task_code_path[task_name]
-                if task_remote_dir[-1] == '/':
-                    task_remote_dir = task_remote_dir[0:-1]
-                last_dir = (task_remote_dir.split('/'))[-1]
-                local_dir = os.path.join(self.code_local_dir, last_dir)
-                local_dir = os.path.join(local_dir, '')
-                if not os.path.exists(local_dir):
-                    os.mkdir(local_dir)
-                local_task_code_path[task_name] = local_dir
-                self.sftp_get_dir(sftp, task_remote_dir, local_dir)
-            print(local_task_code_path)
-            print("Get file from server success!")
-            ssh.close()
 
     # 工作进程管理相关
     def create_task_process(self, task_dict):
@@ -369,14 +287,12 @@ class ClientManager(object):
                 memory_limit_obj = t.get_node_by_path("/{0}/".format(memory_resource_item))
                 memory_group = memory_limit_obj.create_cgroup(group_name)
                 # 进程初始时设置内存上限为可使用全部内存
-                memory_group.controller.limit_in_bytes = int(
-                    self.default_resource_limit['mem_util_limit'] * psutil.virtual_memory().total)
+                memory_group.controller.limit_in_bytes = int(self.default_resource_limit['mem_util_limit'] * psutil.virtual_memory().total)
                 memory_group.controller.tasks = task_set
                 self.process_mem_group_dict[temp_process.pid] = memory_group
                 self.resource_limit_dict[task_name]['mem_util_limit'] = self.default_resource_limit['mem_util_limit']
 
                 # 限制进程的cpu使用率
-
                 cpu_resource_item = "cpu"
                 cpu_limit_obj = t.get_node_by_path("/{0}/".format(cpu_resource_item))
                 cpu_group = cpu_limit_obj.create_cgroup(group_name)
@@ -443,7 +359,6 @@ class ClientManager(object):
             cpu_limit_obj = t.get_node_by_path("/{0}/".format(cpu_resource_item))
             cpu_group = cpu_limit_obj.create_cgroup(group_name)
             cpu_group.controller.cfs_period_us = 1000000
-            assert task_name in self.resource_limit_dict
             cpu_group.controller.cfs_quota_us = int(self.resource_limit_dict[task_name]['cpu_util_limit'] * cpu_group.controller.cfs_period_us *
                                                     psutil.cpu_count())
             cpu_group.controller.tasks = task_set
@@ -503,16 +418,13 @@ class ClientManager(object):
         process_pid = process_resource_info['pid']
         if process_pid in self.pid_set:  # pid是当前机器上正在运行的进程
             if 'cpu_util_limit' in process_resource_info and process_resource_info['cpu_util_limit'] > 0:
-                self.process_cpu_group_dict[process_pid].controller.cfs_quota_us = int(
-                    process_resource_info['cpu_util_limit'] *
-                    self.process_cpu_group_dict[process_pid].controller.cfs_period_us *
-                    psutil.cpu_count())
+                self.process_cpu_group_dict[process_pid].controller.cfs_quota_us = int(process_resource_info['cpu_util_limit'] *
+                                                                                       self.process_cpu_group_dict[process_pid].controller.cfs_period_us *
+                                                                                       psutil.cpu_count())
                 assert process_resource_info['task_name'] in self.resource_limit_dict
-                self.resource_limit_dict[process_resource_info['task_name']]['cpu_util_limit'] = process_resource_info[
-                    'cpu_util_limit']
+                self.resource_limit_dict[process_resource_info['task_name']]['cpu_util_limit'] = process_resource_info['cpu_util_limit']
             if 'mem_util_limit' in process_resource_info and process_resource_info['mem_util_limit'] > 0:
-                self.process_mem_group_dict[process_pid].controller.limit_in_bytes = int(
-                    process_resource_info['mem_util_limit'] * psutil.virtual_memory().total)
+                self.process_mem_group_dict[process_pid].controller.limit_in_bytes = int(process_resource_info['mem_util_limit'] * psutil.virtual_memory().total)
                 assert process_resource_info['task_name'] in self.resource_limit_dict
                 self.resource_limit_dict[process_resource_info['task_name']]['mem_util_limit'] = process_resource_info[
                     'mem_util_limit']
@@ -526,10 +438,9 @@ class ClientManager(object):
         else:
             return False
 
+
     def limit_task_resource(self, task_resource_info):
         task_name = task_resource_info['task_name']
-        print("当前限制针对",task_name)
-        print("当前服务类型",self.code_set)
         if task_name in self.code_set:
             if 'cpu_util_limit' in task_resource_info and task_resource_info['cpu_util_limit'] > 0:
                 for process_obj in self.process_dict[task_name]:
@@ -546,8 +457,6 @@ class ClientManager(object):
                 assert task_name in self.resource_limit_dict
                 self.resource_limit_dict[task_name]['mem_util_limit'] = task_resource_info[
                     'mem_util_limit']
-            print("展示更新后的资源限制")
-            print(self.resource_limit_dict)
             return True
         else:
             return False
@@ -570,8 +479,7 @@ class ClientManager(object):
         # 获取某个进程的mem利用率上限，取值范围[0,1]，-1表示异常情况
         if proc_pid in self.process_mem_group_dict:
             # 该进程使用cgroup限制了资源
-            return float(
-                self.process_mem_group_dict[proc_pid].controller.limit_in_bytes) / psutil.virtual_memory().total
+            return float(self.process_mem_group_dict[proc_pid].controller.limit_in_bytes) / psutil.virtual_memory().total
         elif proc_pid in self.pid_set:
             # 该进程在当前机器上运行，但并没有使用cgroup限制资源（即资源无限）
             return 1.0
@@ -585,8 +493,17 @@ class ClientManager(object):
         assert task_name in self.resource_limit_dict
         return self.resource_limit_dict[task_name]['mem_util_limit']
 
-    # 维护边端状态相关
-    def update_client_status(self):
+    # 系统状态相关
+    def add_edge_ip(self, edge_ip):
+        self.edge_ip_set.add(edge_ip)
+
+    def get_service_list(self):
+        service_list = []
+        for task_name in self.process_dict.keys():
+            service_list.append(task_name)
+        return service_list
+
+    def update_server_status(self):
         device_state_dict = dict()  # 记录设备层面的资源使用情况
         device_state_dict['cpu_ratio'] = psutil.cpu_percent(interval=None, percpu=False)  # 所有cpu的使用率
         device_state_dict['n_cpu'] = self.cpu_count
@@ -611,8 +528,8 @@ class ClientManager(object):
             from jtop import jtop
             with jtop() as jetson:
                 while jetson.ok():
-                    gpu_compute_utilization['0'] = jetson.stats['GPU']  # 计算负载，百分比，5，7
-                    gpu_total_mem = 3.9 * 1024 * 1024  # nano显存总量为3.9G，未找到获取显存总量的api，直接写死，单位kB
+                    gpu_compute_utilization['0'] = jetson.stats['GPU']  # 计算负载百分比，5，7
+                    gpu_total_mem = 3.9 * 1024 * 1024   # nano显存总量为3.9G，未找到获取显存总量的api，直接写死，单位kB
                     gpu_mem_total['0'] = 3.9
                     process_list = jetson.processes
                     gpu_used_mem = 0
@@ -627,103 +544,249 @@ class ClientManager(object):
             for i in range(gpu_device_count):
                 handle = pynvml.nvmlDeviceGetHandleByIndex(i)  # 获取GPU i的handle，后续通过handle来处理
                 memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)  # 通过handle获取GPU i的信息
-                gpu_mem_total[str(i)] = memory_info.total / 1024 / 1024 / 1024
                 gpu_mem_utilization[str(i)] = memory_info.used / memory_info.total * 100  # GPU i的显存占用比例
-                gpu_compute_utilization[str(i)] = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu  # GPU i 计算能力的使用率，
+                gpu_compute_utilization[str(i)] = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu  # GPU i 计算能力的使用率，百分比
+                gpu_mem_total[str(i)] = memory_info.total / 1024 / 1024 / 1024
             pynvml.nvmlShutdown()  # 最后关闭管理工具
         device_state_dict['gpu_mem_utilization'] = gpu_mem_utilization
         device_state_dict['gpu_compute_utilization'] = gpu_compute_utilization
         device_state_dict['gpu_mem_total'] = gpu_mem_total
-        self.client_status['device_state'] = device_state_dict
-        
-        # 更新边缘端各类工作进程的信息
+        self.server_status['device_state'] = device_state_dict
+
+        # 更新云端各类工作进程的信息
         service_state_dict = dict()
         for task_name, resource_limit in self.resource_limit_dict.items():
             service_state_dict[task_name] = resource_limit
-        self.client_status['service_state'] = service_state_dict
+        self.server_status['service_state'] = service_state_dict
         
         return {
             'update_flag': True
         }
 
-    def get_client_status(self):
-        return self.client_status
+    def get_server_status(self):
+        return self.server_status
 
-
-class ClientAppConfig(object):
-    # flask定时任务的配置类
-    JOBS = [
-        {
-            'id': 'job1',
-            'func': 'app_client_test:trigger_update_client_status',
-            'trigger': 'interval',  # 间隔触发
-            'seconds': 3,  # 定时器时间间隔
-        },
-        {
-            'id': 'job2',
-            'func': 'app_client_test:trigger_get_server_service_info',
-            'trigger': 'interval',  # 间隔触发
-            'seconds': 5,  # 定时器时间间隔
+    
+    
+    def update_client_status(self, edge_ip, edge_status):
+        assert edge_ip in self.edge_ip_set
+        self.clients_status[edge_ip] = edge_status
+        print(self.clients_status)
+        return {
+            'update_flag': True
         }
-    ]
-    SCHEDULER_API_ENABLED = True
+
+
+    def get_clients_status(self):
+        return self.clients_status
+
+
+    def get_system_status(self):
+        system_status_dict = dict()
+        system_status_dict['cloud'] = dict()
+        system_status_dict['host'] = dict()
+        # 由于这里用到了self.server_ip，因此命令行--server_ip参数不能设置为0.0.0.0
+        system_status_dict['cloud'][self.server_ip] = self.server_status
+        for edge_ip in self.clients_status.keys():
+            system_status_dict['host'][edge_ip] = self.clients_status[edge_ip]
+        return system_status_dict
+
+
+
+    def get_cluster_info(self):
+        cluster_info = dict()
+        cluster_info[self.server_ip] = self.server_status
+        assert isinstance(cluster_info[self.server_ip], dict)
+        cluster_info[self.server_ip]['node_role'] = 'cloud'
+
+        for edge_ip in self.clients_status.keys():
+            cluster_info[edge_ip] = self.clients_status[edge_ip]
+            cluster_info[edge_ip]['node_role'] = 'edge'
+
+        return cluster_info
+
+    def get_execute_url(self, task_name):
+        res = dict()
+        # 边缘端可执行任务的接口
+        for edge_ip in self.edge_ip_set:
+            edge_ip_port = edge_ip + ':' + str(self.edge_port)
+            edge_url = "http://" + edge_ip_port + "/execute_task/" + task_name
+            edge_dict = {
+                "url": edge_url
+            }
+            # 由于云端是定期请求边缘端的资源情况的，因此在第一次请求之前边缘端的资源情况为空，需要进行特判
+            if "mem_ratio" in self.clients_status[edge_ip]:
+                edge_dict["mem_ratio"] = self.clients_status[edge_ip]["mem_ratio"]
+            if "cpu_ratio" in self.clients_status[edge_ip]:
+                edge_dict["cpu_ratio"] = self.clients_status[edge_ip]["cpu_ratio"]
+            if "n_cpu" in self.clients_status[edge_ip]:
+                edge_dict["n_cpu"] = self.clients_status[edge_ip]["n_cpu"]
+            res[edge_ip] = edge_dict
+
+        # 服务端可执行任务的接口
+        server_ip_port = self.server_ip + ':' + str(self.server_port)
+        server_url = "http://" + server_ip_port + "/execute_task/" + task_name
+        server_dict = {
+            "url": server_url
+        }
+        if "mem_ratio" in self.server_status:
+            server_dict["mem_ratio"] = self.server_status["mem_ratio"]
+        if "cpu_ratio" in self.server_status:
+            server_dict["cpu_ratio"] = self.server_status["cpu_ratio"]
+        if "n_cpu" in self.server_status:
+            server_dict["n_cpu"] = self.server_status["n_cpu"]
+        res[self.server_ip] = server_dict
+
+        return res
+
+
 
 
 WSGIRequestHandler.protocol_version = "HTTP/1.1"
 app = Flask(__name__)
-client_manager = ClientManager()   # 用于管理边缘端的代码、工作进程、消息队列
+server_manager = ServerManager()
 
 
-@app.route('/task-register', methods=['POST'])
-def task_register():
-    # 获取应用信息
-    task_dict = request.get_json()
-    print(task_dict)
-    # print(type(task_dict))
+# 用户编辑json、提交任务的界面
+@app.route("/edit-json")
+def edit_json():
+    return render_template('edit_json.html')
 
-    # 下载应用相关代码
-    client_manager.download_task_code(task_dict)
 
-    # 创建执行应用中各个任务的进程
-    client_manager.create_task_process(task_dict)
+# 路由到dist目录
+@app.route("/dist/<path:path>")
+def send_dist(path):
+    return send_from_directory("dist", path)
+    
+    
+# TODO: 获取现有的所有套餐
+@app.route("/get-dag-workflows-api", methods=['GET'])
+def get_dag_workflows_api():
+    return jsonify(server_manager.dag_workflows)
 
-    # 注册成功响应
-    res = make_response("Register success!")
-    res.status = '200'  # 设置状态码
-    res.headers['Access-Control-Allow-Origin'] = "*"  # 设置允许跨域
-    res.headers['Access-Control-Allow-Methods'] = 'PUT,GET,POST,DELETE'
-    return res
+@app.route("/update-dag-workflows-api", methods=['POST'])
+def update_dag_workflows_api():
+    new_dag_workflows = json.loads(request.get_data(as_text=True))
+    print(new_dag_workflows)
+    server_manager.dag_workflows = new_dag_workflows
+    return jsonify(server_manager.dag_workflows)
+
+
+@app.route('/upload-json-and-codefiles-api', methods=['POST'])
+def upload_json_and_codefiles_api():
+    try:
+        # 根据用户上传的json文件构造应用相关信息
+        received_files = request.files
+        task_json = received_files.get('task_json')  # 用户提交的json文件，前端的key为'task_json'
+        task_dict = json.load(task_json)
+        task_dict['task_code_path'] = dict()  # 存储各个阶段代码的路径，以精简json文件
+
+        for file in received_files:   # file为前端设置的、各个文件的key，为任务中各个阶段的名字，与代码文件对应
+            if file == 'task_json':
+                continue
+            if file not in server_manager.code_set:
+                server_manager.code_set.add(file)
+                save_path = server_manager.server_codebase + file + '.zip'
+                received_files[file].save(save_path)
+                with zipfile.ZipFile(save_path, 'r') as zip_ref:
+                    zip_ref.extractall(server_manager.server_codebase + file)
+            task_dict['task_code_path'][file] = server_manager.server_codebase + file
+
+        server_manager.task_dict_list.append(task_dict)
+
+        # 代码下装时，创建云端工作进程（为DAG图中每一个子任务都创建一个工作进程）
+        server_manager.create_task_process(task_dict)
+
+        # 响应
+        res = make_response("提交成功！")
+        res.status = '200'  # 设置状态码
+        res.headers['Access-Control-Allow-Origin'] = "*"  # 设置允许跨域
+        res.headers['Access-Control-Allow-Methods'] = 'PUT,GET,POST,DELETE'
+        return res
+
+    except:
+        res = make_response("提交失败！")
+        res.status = '200'
+        res.headers['Access-Control-Allow-Origin'] = "*"
+        res.headers['Access-Control-Allow-Methods'] = 'PUT,GET,POST,DELETE'
+        return res
+
+
+@app.route("/register_edge", methods=['POST'])
+def register_edge():
+    edge_ip = flask.request.json["device_ip"]
+    server_manager.add_edge_ip(edge_ip)
+    return jsonify(edge_ip)
 
 
 @app.route('/execute_task/<string:task_name>', methods=['POST'])
 def execute_task(task_name):
     # 最终供调度模块、任务执行请求服务的接口
     output_ctx = dict()
-    if task_name in client_manager.process_dict:
+    if task_name in server_manager.process_dict:
         input_ctx = request.get_json()
         if task_name == 'face_detection':
             input_ctx['image'] = decode_image(input_ctx['image'])
-            client_manager.input_queue_dict[task_name][0].put(input_ctx)  # 单进程串行执行所有任务
-            output_ctx = client_manager.output_queue_dict[task_name][0].get()
+            server_manager.input_queue_dict[task_name][0].put(input_ctx)  # 单进程串行执行所有任务
+            output_ctx = server_manager.output_queue_dict[task_name][0].get()
             for i in range(len(output_ctx['faces'])):
                 output_ctx['faces'][i] = encode_image(output_ctx['faces'][i])
         elif task_name == 'face_alignment':
             for i in range(len(input_ctx['faces'])):
                 input_ctx['faces'][i] = decode_image(input_ctx['faces'][i])
-            client_manager.input_queue_dict[task_name][0].put(input_ctx)  # 单进程串行执行所有任务
-            output_ctx = client_manager.output_queue_dict[task_name][0].get()
+            server_manager.input_queue_dict[task_name][0].put(input_ctx)  # 单进程串行执行所有任务
+            output_ctx = server_manager.output_queue_dict[task_name][0].get()
         elif task_name == 'car_detection':
             input_ctx['image'] = decode_image(input_ctx['image'])
-            client_manager.input_queue_dict[task_name][0].put(input_ctx)  # 单进程串行执行所有任务
-            output_ctx = client_manager.output_queue_dict[task_name][0].get()
+            server_manager.input_queue_dict[task_name][0].put(input_ctx)  # 单进程串行执行所有任务
+            output_ctx = server_manager.output_queue_dict[task_name][0].get()
         elif task_name == 'gender_classification':
             for i in range(len(input_ctx['faces'])):
                 input_ctx['faces'][i] = decode_image(input_ctx['faces'][i])
-            client_manager.input_queue_dict[task_name][0].put(input_ctx)  # 单进程串行执行所有任务
-            output_ctx = client_manager.output_queue_dict[task_name][0].get()
+            server_manager.input_queue_dict[task_name][0].put(input_ctx)  # 单进程串行执行所有任务
+            output_ctx = server_manager.output_queue_dict[task_name][0].get()
         assert isinstance(output_ctx['proc_resource_info'], dict)
-        output_ctx['proc_resource_info']['cpu_util_limit'] = client_manager.get_task_cpu_util_limit(task_name)
-        output_ctx['proc_resource_info']['mem_util_limit'] = client_manager.get_task_mem_util_limit(task_name)
+        output_ctx['proc_resource_info']['cpu_util_limit'] = server_manager.get_task_cpu_util_limit(task_name)
+        output_ctx['proc_resource_info']['mem_util_limit'] = server_manager.get_task_mem_util_limit(task_name)
+        output_ctx['execute_flag'] = True
+    else:
+        output_ctx['execute_flag'] = False
+    # print("返回计算完毕的结果")
+    return jsonify(output_ctx)
+
+
+@app.route('/execute_task_old/<string:task_name>', methods=['POST'])
+def execute_task_old(task_name):
+    # 最初版本的任务执行接口（配合最初版本的face_detection封装代码）
+    output_ctx = dict()
+    if task_name in server_manager.process_dict:
+        input_ctx = request.get_json()
+        input_ctx['image'] = decode_image(input_ctx['image'])
+        server_manager.input_queue_dict[task_name][0].put(input_ctx)  # 单进程串行执行所有任务
+        output_ctx = server_manager.output_queue_dict[task_name][0].get()
+        output_ctx['execute_flag'] = True
+    else:
+        output_ctx['execute_flag'] = False
+    return jsonify(output_ctx)
+
+
+@app.route('/execute_task_new/<string:task_name>', methods=['POST'])
+def execute_task_new(task_name):
+    # 新版本的任务执行接口（配合新版本的face_detection封装代码）
+    output_ctx = dict()
+    if task_name in server_manager.process_dict:
+        input_ctx = request.get_json()
+        if task_name == 'face_detection':
+            input_ctx['image'] = decode_image(input_ctx['image'])
+            server_manager.input_queue_dict[task_name][0].put(input_ctx)  # 单进程串行执行所有任务
+            output_ctx = server_manager.output_queue_dict[task_name][0].get()
+            for i in range(len(output_ctx['faces'])):
+                output_ctx['faces'][i] = encode_image(output_ctx['faces'][i])
+        elif task_name == 'face_alignment':
+            for i in range(len(input_ctx['faces'])):
+                input_ctx['faces'][i] = decode_image(input_ctx['faces'][i])
+            server_manager.input_queue_dict[task_name][0].put(input_ctx)  # 单进程串行执行所有任务
+            output_ctx = server_manager.output_queue_dict[task_name][0].get()
         output_ctx['execute_flag'] = True
     else:
         output_ctx['execute_flag'] = False
@@ -734,15 +797,15 @@ def execute_task(task_name):
 def concurrent_execute_task_new(task_name):
     # 新版本的任务并行执行接口（配合新版本的face_detection封装代码，多目标任务并行执行并汇总结果）
     output_ctx = dict()
-    if task_name in client_manager.process_dict:
+    if task_name in server_manager.process_dict:
         input_ctx = request.get_json()
         if task_name == 'face_detection':
             input_ctx['image'] = decode_image(input_ctx['image'])
-            client_manager.input_queue_dict[task_name][0].put(input_ctx)  # detection任务单进程执行
-            output_ctx = client_manager.output_queue_dict[task_name][0].get()
+            server_manager.input_queue_dict[task_name][0].put(input_ctx)  # detection任务单进程执行
+            output_ctx = server_manager.output_queue_dict[task_name][0].get()
             for i in range(len(output_ctx['faces'])):
                 output_ctx['faces'][i] = encode_image(output_ctx['faces'][i])
-            output_ctx['proc_resource_info']['cpu_util_limit'] = client_manager.get_process_cpu_util_limit(
+            output_ctx['proc_resource_info']['cpu_util_limit'] = server_manager.get_process_cpu_util_limit(
                                                                  output_ctx['proc_resource_info']['pid'])
             output_ctx['proc_resource_info_list'] = [output_ctx['proc_resource_info']]
             del output_ctx['proc_resource_info']
@@ -750,7 +813,7 @@ def concurrent_execute_task_new(task_name):
             for i in range(len(input_ctx['faces'])):
                 input_ctx['faces'][i] = decode_image(input_ctx['faces'][i])
             task_num = len(input_ctx['faces'])  # 任务数量
-            work_process_num = len(client_manager.process_dict[task_name])  # 执行该任务的工作进程数量
+            work_process_num = len(server_manager.process_dict[task_name])  # 执行该任务的工作进程数量
             output_ctx_list = []
             proc_resource_info_list = []
             if task_num <= work_process_num:  # 任务数量小于工作进程数量，则并发的分给各个进程，每个进程执行一个任务
@@ -760,10 +823,10 @@ def concurrent_execute_task_new(task_name):
                     temp_input_ctx['faces'] = [input_ctx['faces'][i]]
                     temp_input_ctx['bbox'] = [input_ctx['bbox'][i]]
                     temp_input_ctx['prob'] = []
-                    client_manager.input_queue_dict[task_name][i].put(temp_input_ctx)
+                    server_manager.input_queue_dict[task_name][i].put(temp_input_ctx)
                 # 按序获取各个工作进程的执行结果
                 for i in range(task_num):
-                    temp_output_ctx = client_manager.output_queue_dict[task_name][i].get()
+                    temp_output_ctx = server_manager.output_queue_dict[task_name][i].get()
                     output_ctx_list.append(temp_output_ctx)
             else:
                 ave_task_num = int(task_num / work_process_num)  # 平均每个进程要执行的任务数量
@@ -776,7 +839,7 @@ def concurrent_execute_task_new(task_name):
                     temp_input_ctx['faces'] = input_ctx['faces'][temp_start_index:temp_end_index]
                     temp_input_ctx['bbox'] = input_ctx['bbox'][temp_start_index:temp_end_index]
                     temp_input_ctx['prob'] = []
-                    client_manager.input_queue_dict[task_name][i].put(temp_input_ctx)
+                    server_manager.input_queue_dict[task_name][i].put(temp_input_ctx)
                 for i in range(more_task_num, work_process_num):
                     temp_input_ctx = dict()
                     temp_start_index = more_task_num * (ave_task_num + 1) + (i - more_task_num) * ave_task_num
@@ -784,27 +847,28 @@ def concurrent_execute_task_new(task_name):
                     temp_input_ctx['faces'] = input_ctx['faces'][temp_start_index:temp_end_index]
                     temp_input_ctx['bbox'] = input_ctx['bbox'][temp_start_index:temp_end_index]
                     temp_input_ctx['prob'] = []
-                    client_manager.input_queue_dict[task_name][i].put(temp_input_ctx)
+                    server_manager.input_queue_dict[task_name][i].put(temp_input_ctx)
                 # 按序获取各个工作进程的执行结果
                 for i in range(work_process_num):
-                    temp_output_ctx = client_manager.output_queue_dict[task_name][i].get()
+                    temp_output_ctx = server_manager.output_queue_dict[task_name][i].get()
                     output_ctx_list.append(temp_output_ctx)
             output_ctx["count_result"] = {"up": 0, "total": 0}
             for t_output_ctx in output_ctx_list:
                 output_ctx["count_result"]["up"] += t_output_ctx["count_result"]["up"]
                 output_ctx["count_result"]["total"] += t_output_ctx["count_result"]["total"]
-                t_output_ctx['proc_resource_info']['cpu_util_limit'] = client_manager.get_process_cpu_util_limit(
+                t_output_ctx['proc_resource_info']['cpu_util_limit'] = server_manager.get_process_cpu_util_limit(
                                                                        t_output_ctx['proc_resource_info']['pid'])
                 proc_resource_info_list.append(t_output_ctx['proc_resource_info'])
             output_ctx['proc_resource_info_list'] = proc_resource_info_list
         elif task_name == 'car_detection':
             input_ctx['image'] = decode_image(input_ctx['image'])
-            client_manager.input_queue_dict[task_name][0].put(input_ctx)  # detection任务单进程执行
-            output_ctx = client_manager.output_queue_dict[task_name][0].get()
-            output_ctx['proc_resource_info']['cpu_util_limit'] = client_manager.get_process_cpu_util_limit(
+            server_manager.input_queue_dict[task_name][0].put(input_ctx)  # detection任务单进程执行
+            output_ctx = server_manager.output_queue_dict[task_name][0].get()
+            output_ctx['proc_resource_info']['cpu_util_limit'] = server_manager.get_process_cpu_util_limit(
                 output_ctx['proc_resource_info']['pid'])
             output_ctx['proc_resource_info_list'] = [output_ctx['proc_resource_info']]
             del output_ctx['proc_resource_info']
+
         output_ctx['execute_flag'] = True
     else:
         output_ctx['execute_flag'] = False
@@ -813,9 +877,10 @@ def concurrent_execute_task_new(task_name):
 
 @app.route('/add_work_process', methods=['POST'])
 def add_work_process():
+    # 添加某类任务工作进程的接口
     work_process_info = request.get_json()
     create_res = dict()
-    create_res['create_flag'] = client_manager.add_work_process(work_process_info)
+    create_res['create_flag'] = server_manager.add_work_process(work_process_info)
     return jsonify(create_res)
 
 
@@ -824,7 +889,7 @@ def decrease_work_process():
     # 减少某类任务工作进程的接口
     decrease_info = request.get_json()
     decrease_res = dict()
-    decrease_res['decrease_flag'] = client_manager.decrease_work_process(decrease_info)
+    decrease_res['decrease_flag'] = server_manager.decrease_work_process(decrease_info)
     return jsonify(decrease_res)
 
 
@@ -832,7 +897,7 @@ def decrease_work_process():
 def limit_process_resource():
     process_resource_info = request.get_json()
     limit_res = dict()
-    limit_res['limit_flag'] = client_manager.limit_process_resource(process_resource_info)
+    limit_res['limit_flag'] = server_manager.limit_process_resource(process_resource_info)
     return jsonify(limit_res)
 
 
@@ -842,51 +907,79 @@ def limit_task_resource():
     print("接收到资源限制操作")
     print(task_resource_info)
     limit_res = dict()
-    limit_res['limit_flag'] = client_manager.limit_task_resource(task_resource_info)
+    limit_res['limit_flag'] = server_manager.limit_task_resource(task_resource_info)
     print(limit_res)
     return jsonify(limit_res)
 
 
-@app.route("/update_client_status")
-def update_client_status():
-    # 更新边缘端机器整体的资源信息
-    update_result = client_manager.update_client_status()
-    
-    # 向云端发起post请求，更新云端的边缘设备信息
-    client_status = client_manager.get_client_status()
-    sess = requests.Session()
-    r = sess.post(url="http://{}:{}/update_client_status".format(client_manager.server_ip, client_manager.server_port),
-                  json={"device_status": client_status,
-                        "device_ip": client_manager.edge_ip})
-    sess.close()
+@app.route('/get_service_list')
+def get_service_list():
+    # 获取当前系统中可以执行任务的名称列表
+    service_list = server_manager.get_service_list()
+    return jsonify(service_list)
+
+
+@app.route('/get_execute_url/<string:task_name>')
+def get_execute_url(task_name):
+    # 获取任务task_name在系统中所有计算服务调用的url
+    res = server_manager.get_execute_url(task_name)
+    return jsonify(res)
+
+
+@app.route("/update_server_status")
+def update_server_status():
+    # 更新云端机器整体的资源信息
+    update_result = server_manager.update_server_status()
     return jsonify(update_result)
 
 
-@app.route("/get_client_status")
-def get_client_status():
-    return jsonify(client_manager.get_client_status())
+@app.route("/get_server_service_info")
+def get_server_service_info():
+    # 返回云端当前所部署服务的信息，包括服务文件位置等，用于边缘端进行软件下装
+    task_info_list = server_manager.task_dict_list
+    return jsonify({'service_info_list': task_info_list})
+
+
+@app.route("/update_client_status", methods=["POST"])
+def update_client_status():
+    para = flask.request.json
+    update_result = server_manager.update_client_status(edge_ip=para['device_ip'], edge_status = para['device_status'])
+    return jsonify(update_result)
+
+
+@app.route("/get_system_status")
+def get_system_status():
+    # 获取整个系统的状态信息，包括云端和边缘端
+    system_status_dict = server_manager.get_system_status()
+    return jsonify(system_status_dict)
+
+
+@app.route("/get_resource_info")
+def get_resource_info():
+    # 配合调度器获取系统资源信息的接口
+    resource_info = server_manager.get_system_status()
+    return jsonify(resource_info)
+
+
+@app.route("/get_cluster_info")
+def get_cluster_info():
+    # 配合调度器获取集群资源信息的接口
+    cluster_info = server_manager.get_cluster_info()
+    return jsonify(cluster_info)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--server_ip', dest='server_ip', type=str, default='114.212.81.11')
-    parser.add_argument('--server_port', dest='server_port', type=int, default=4500)
-    parser.add_argument('--edge_ip', dest='edge_ip', type=str, default='192.168.1.9')
-    parser.add_argument('--edge_port', dest='edge_port', type=int, default=4500)
+    parser.add_argument('--server_ip', dest='server_ip', type=str, default='127.0.0.1')
+    parser.add_argument('--server_port', dest='server_port', type=int, default=4520)
+    parser.add_argument('--edge_port', dest='edge_port', type=int, default=4520)
     args = parser.parse_args()
 
-    client_manager.init_client_param(args.server_ip, args.server_port, args.edge_ip, args.edge_port)
+    server_manager.init_server_param(args.server_ip, args.server_port, args.edge_port)
 
-    register_edge_to_server()  # 向云端注册自己的存在
-
-    app.config.from_object(ClientAppConfig())
-    scheduler = APScheduler()  # 利用APScheduler启动定时任务
-    scheduler.init_app(app)
-    scheduler.start()
 
     #自动启动服务进程，无需接收用户上传提交代码文件。需要读取json并使用。SchedulingSyetem目录之下已经有响应模型，不需要再接收下装了。
     #打开json文件，自动创建进程
-    
     import json
     json_data='\
     {\
@@ -894,13 +987,13 @@ if __name__ == '__main__':
         "flow": ["face_detection", "gender_classification"]\
     }\
     '
-
-    client_manager.code_set.add("face_detection")
-    client_manager.code_set.add("gender_classification")
+    
+    server_manager.code_set.add("face_detection")
+    server_manager.code_set.add("gender_classification")
     task_dict=json.loads(json_data)
     print(type(task_dict))
     print(task_dict.keys())
     print(task_dict)
-    client_manager.create_task_process(task_dict)
-
-    app.run(host='0.0.0.0', port=client_manager.edge_port)
+    server_manager.create_task_process(task_dict)
+    #测试
+    app.run(host=server_manager.server_ip, port=server_manager.server_port)
